@@ -129,5 +129,3 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 ## 许可证
 
 MIT
-
-[![Star History Chart](https://api.star-history.com/svg?repos=codertesla/bili-comment-buddy&type=Date)](https://star-history.com/#codertesla/bili-comment-buddy&Date)
