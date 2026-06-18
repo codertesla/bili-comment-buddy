@@ -1,100 +1,130 @@
 # B 站嘴替小助手
 
-仅供个人测试的 Tampermonkey 脚本。它在 B 站视频页提取当前视频信息和页面中已加载的高赞评论，调用 OpenAI-compatible Chat Completions API 生成评论，并默认让用户预览和编辑。
+[![安装脚本](https://img.shields.io/badge/安装脚本-GitHub-00aeec.svg?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)
+[![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
+[![Version](https://img.shields.io/badge/Version-v0.5.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
-## 功能范围
+一个给 B 站视频生成可编辑评论的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，调用 OpenAI-compatible Chat Completions API 生成一条中文评论，并默认让用户预览、编辑后再处理。
 
-- **可靠主流程：当前视频模式。** 支持识别 BV 号、标题、简介、UP 主、URL，以及最多 10 条当前页面已加载的评论。
-- **简化发现：动态页 DOM 扫描。** 在 `t.bilibili.com`、空间动态页或空间视频页扫描当前已渲染的视频链接，找到第一个未处理 BV 号，并提供进入视频页的链接。
-- 支持 OpenAI-compatible `/chat/completions`，可配置 API 地址、Key、模型、temperature、评论风格预设和每日自动评论上限。
-- 配置、已处理 BV 号、每日发布计数和最近发布时间通过 `GM_getValue` / `GM_setValue` 保存。
-- 默认开启测试模式、关闭“生成后自动发布”。
+脚本默认开启测试模式，重点是“辅助生成”和“谨慎发布”，不是批量刷评论工具。
 
-脚本没有调用关注列表、动态流或评论发布私有 API。B 站接口和参数没有在当前环境用真实账号确认，因此 MVP 使用页面 DOM，避免依赖未经确认的接口。
+## 功能
+
+- 当前视频识别：读取 BV 号、标题、简介、UP 主、URL 和最多 10 条当前页面已加载评论。
+- LLM 评论生成：支持 OpenAI-compatible `/chat/completions` 接口。
+- 风格预设：内置轻松活泼、理性正式、友好鼓励、犀利观点和自定义提示词。
+- 安全发布流程：默认只填入评论框；关闭测试模式后才会直接发送。
+- 自动发布限频：支持每日自动评论上限、10 分钟间隔、本次运行最多 1 条等保护。
+- 动态页发现：可在动态页、空间动态页、空间视频页扫描当前已渲染的视频链接。
+- 亮色/暗色适配：浮动面板和设置弹窗会跟随系统主题。
 
 ## 安装
 
-1. 在浏览器安装 Tampermonkey。
-2. 打开 Tampermonkey 管理面板，选择“添加新脚本”。
-3. 将 `bilibili-llm-comment.user.js` 的完整内容放入编辑器并保存。
-4. 登录 B 站，打开形如 `https://www.bilibili.com/video/BV...` 的视频页。
-5. 页面右下角应显示“B 站嘴替小助手”面板。
+1. 安装脚本管理器：[Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)。
+2. 点击安装脚本：[B 站嘴替小助手](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)。
+3. 登录 B 站，打开形如 `https://www.bilibili.com/video/BV...` 的视频页。
+4. 页面右下角应显示“B 站嘴替小助手”面板。
 
 脚本使用 `@connect *`，因为 OpenAI-compatible API 地址由用户配置。Tampermonkey 首次请求某个 API 域名时可能要求授权。
 
-## API 配置
-
-点击浮动面板右上角的“设置”，或从 Tampermonkey 扩展菜单选择“打开 B 站嘴替小助手设置”。设置页面包含：
-
-- **API 地址**：基础地址（如 `https://api.deepseek.com/v1`）或完整的 `/chat/completions` 地址。
-- **模型名称**：默认 `deepseek-v4-flash`，也可填写服务商实际提供的其他模型 ID。
-- **API Key**：仅存入 Tampermonkey 的脚本配置，不写入源码。
-- **Temperature**：范围 0～2，默认 1.0。
-- **评论风格预设**：内置轻松活泼、理性正式、友好鼓励、犀利观点和自定义。
-- **风格提示词**：附加给系统提示词的具体风格要求；选择预设会自动填入，可继续编辑。
-- **每日自动评论上限**：自动发布每天最多发送的评论数，默认 5 条。
-
-本项目不需要本地代理，因此没有 `.env.example`。
-
-## 推荐测试步骤
+## 快速开始
 
 1. 保持“测试模式”开启、“生成后自动发布”关闭。
-2. 打开一个视频页并滚动到评论区，让页面加载若干评论。
+2. 打开一个视频页，必要时滚动到评论区，让页面加载若干评论。
 3. 点击“检查最新视频”，核对标题、UP 主、简介和提取到的评论数量。
-4. 填写 API 配置，点击“生成评论”，检查并编辑生成文本。
-5. 点击“填入评论框”。测试模式下脚本只向页面评论框填入文本，不点击发送，也不写入已处理记录。
-6. 人工清空测试文本。确认选择器在当前页面可用后，可关闭测试模式；此时按钮显示“立即发布”，点击后会直接发送，不再弹出确认框。
-7. 刷新页面，检查配置仍存在；成功发布的视频再次操作时应被拒绝。
+4. 点击右上角“设置”，填写 API 地址、模型名称、API Key 和生成偏好。
+5. 点击“生成评论”，检查并编辑生成文本。
+6. 点击“填入评论框”。测试模式下脚本只会填入文本，不会点击发送。
+7. 确认选择器可用后，可关闭测试模式；此时按钮显示“立即发布”，点击后会直接发送。
+
+## 配置
+
+点击浮动面板右上角的“设置”，或从脚本管理器菜单选择“打开 B 站嘴替小助手设置”。
+
+- API 地址：基础地址，如 `https://api.deepseek.com/v1`，也支持完整 `/chat/completions` 地址。
+- 模型名称：默认 `deepseek-v4-flash`，可填写服务商实际提供的模型 ID。
+- API Key：仅存入脚本管理器配置，不写入源码。
+- Temperature：范围 0～2，默认 1.0。
+- 评论风格预设：轻松活泼、理性正式、友好鼓励、犀利观点、自定义。
+- 风格提示词：附加给系统提示词的具体要求；选择预设会自动填入，可继续编辑。
+- 每日自动评论上限：自动发布每天最多发送的评论数，默认 5 条。
+
+本项目不需要本地代理，因此没有 `.env.example`。
 
 ## 自动发布约束
 
 自动发布只有同时满足以下条件才会执行：
 
-- 用户主动开启“自动发布”；
-- 用户主动关闭“测试模式”；
-- 当前视频没有已处理记录；
-- 距离上次发布至少 10 分钟；
-- 本次脚本运行尚未发布评论；
-- 当天发布数少于设置中的“每日自动评论上限”；
+- 用户主动开启“生成后自动发布”。
+- 用户主动关闭“测试模式”。
+- 当前视频没有已处理记录。
+- 距离上次发布至少 10 分钟。
+- 本次脚本运行尚未发布评论。
+- 当天发布数少于设置中的“每日自动评论上限”。
 - 登录状态可确认，页面没有验证码或风险提示。
 
-自动发布在生成完成后触发，每次运行最多发送 1 条。检测到“验证码”“操作频繁”“账号存在风险”等提示时会立即停止，不会尝试绕过。
-
-浮动面板只保留当前页面操作：视频信息、生成文本、测试模式、生成后自动发布、状态、今日自动发布额度和日志。API Key、模型、温度、评论风格与每日自动评论上限位于独立设置页面；发生错误时日志会自动展开。
+自动发布在生成完成后触发。检测到“验证码”“操作频繁”“账号存在风险”等提示时会立即停止，不会尝试绕过。
 
 ## 数据与安全
 
-- API Key 保存在 Tampermonkey 配置中，具有被浏览器扩展、恶意脚本或本机用户读取的风险。建议使用限额、可撤销的专用 Key。
+- API Key 保存在脚本管理器配置中，具有被浏览器扩展、恶意脚本或本机用户读取的风险。建议使用限额、可撤销的专用 Key。
 - 不要把 API Key 写入脚本源码或提交到版本控制。
 - 脚本不读取、保存或记录 Cookie、CSRF Token，也不会在日志中显示完整 API Key。
 - 脚本不绕过验证码、风控、登录限制或平台限制。
-- 默认启用测试模式。关闭测试模式后，“立即发布”和“生成后自动发布”都不会再次确认；自动发布可能违反平台规则或触发风控，使用者需自行评估。
+- 默认启用测试模式。关闭测试模式后，“立即发布”和“生成后自动发布”都不会再次确认。
 
 ## 已知限制
 
-- B 站是 SPA，DOM 和 Web Components 会持续变化。脚本会递归查询开放的 Shadow DOM，并兼容当前 `.brt-editor` 编辑器；所有选择器仍集中在 `SELECTORS` 常量中，失效时面板会明确报错。
-- 评论提取只读取当前页面已经渲染的顶层评论，不主动翻页，不保证代表全站真实“最高赞”。先滚动加载评论可改善上下文。
-- 动态页发现只扫描当前已渲染区域，按页面 DOM 顺序取第一个未处理视频；它不是账号关注动态 API 的完整实现，也不保证全量或严格时间排序。
+- B 站是 SPA，DOM 和 Web Components 会持续变化；页面改版可能导致选择器失效。
+- 评论提取只读取当前页面已经渲染的顶层评论，不主动翻页。
+- 动态页发现只扫描当前已渲染区域，不是账号关注动态 API 的完整实现。
 - 播放列表、番剧、稍后再看等特殊页面布局可能无法提取或发布。
-- 发布成功以“点击发送后输入框清空”为页面侧证据。网络延迟、审核或页面改版可能导致结果不确定；不确定时脚本不写入已处理记录，并要求人工检查。
-- 登录状态检查采用页面状态和导航元素。无法可靠确认时会保守地拒绝发布。
+- 发布成功以“点击发送后输入框清空”为页面侧证据；网络延迟、审核或页面改版可能导致结果不确定。
 - LLM 输出会检查非空、AI 自述和 20～100 字长度，但内容真实性和质量仍需人工复核。
 
-## 状态清理与卸载
+## 常见问题
 
-卸载脚本：在 Tampermonkey 管理面板中禁用或删除该脚本。
+<details>
+<summary><b>为什么默认是测试模式？</b></summary>
 
-删除脚本通常会移除其存储。若只想重置数据，可在 Tampermonkey 的脚本存储界面删除以下键：
+评论发布是账号行为，误发、频繁发送或内容不合适都可能触发平台风控。测试模式可以先确认页面选择器、评论框填入和生成质量都正常。
+</details>
 
-- `bllmc_config_v1`
-- `bllmc_processed_v1`
-- `bllmc_publish_stats_v1`
+<details>
+<summary><b>为什么需要滚动到评论区？</b></summary>
 
-## 文件
+B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得更完整的评论上下文，也能提高找到评论编辑器的成功率。
+</details>
 
-- `bilibili-llm-comment.user.js`：可直接导入的完整油猴脚本。
-- `README.md`：安装、配置、测试、安全和限制说明。
+<details>
+<summary><b>可以使用哪些模型？</b></summary>
+
+只要服务商兼容 OpenAI Chat Completions API，通常都可以尝试。模型名称、API 地址和 Key 需要以服务商实际文档为准。
+</details>
+
+<details>
+<summary><b>如何重置脚本数据？</b></summary>
+
+在脚本管理器的脚本存储界面删除 `bllmc_config_v1`、`bllmc_processed_v1` 和 `bllmc_publish_stats_v1`。
+</details>
+
+## 更新日志
+
+- v0.5.1 (2026-06-18)：减少发布流程中的页面滚动跳动。
+- v0.5.0 (2026-06-18)：新增评论风格预设、每日自动评论上限，并重做浮动面板和设置弹窗 UI。
+- v0.4.1 (2026-06-18)：增强自动发布保护、日志和设置弹窗。
+- v0.1.0 (2026-06-18)：初始版本。
+
+## 反馈
+
+- GitHub Issues：[提交 BUG 或建议](https://github.com/codertesla/bili-comment-buddy/issues)
+- 仓库地址：[codertesla/bili-comment-buddy](https://github.com/codertesla/bili-comment-buddy)
+
+**免责声明**：本脚本仅供学习和个人使用。使用本脚本产生的任何后果由用户自行承担。
 
 ## 许可证
 
 MIT
+
+[![Star History Chart](https://api.star-history.com/svg?repos=codertesla/bili-comment-buddy&type=Date)](https://star-history.com/#codertesla/bili-comment-buddy&Date)
