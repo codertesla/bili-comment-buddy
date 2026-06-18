@@ -4,6 +4,8 @@
 // @version      0.5.1
 // @description  为当前 B 站视频生成可编辑的相关评论，默认测试模式，支持受限自动发布。
 // @author       codertesla
+// @icon         https://www.bilibili.com/favicon.ico
+// @icon64       https://www.bilibili.com/favicon.ico
 // @match        https://www.bilibili.com/video/*
 // @match        https://www.bilibili.com/list/*
 // @match        https://t.bilibili.com/*
