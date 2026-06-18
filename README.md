@@ -5,6 +5,10 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
 [![Version](https://img.shields.io/badge/Version-v0.6.7-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
+## 界面预览
+
+![B 站嘴替小助手界面](UI.webp)
+
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。
 
 脚本的核心用途是帮你起草一条贴合视频内容的评论。默认开启测试模式，生成后先预览和编辑，不是批量刷评论工具。
