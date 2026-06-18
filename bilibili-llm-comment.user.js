@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.6
+// @version      0.6.7
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.6',
+    version: '0.6.7',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1021,7 +1021,7 @@
       panel.innerHTML = `
         <div class="bllmc-header" data-role="dragHandle">
           <button data-action="collapse" type="button" aria-expanded="true">
-            <span class="bllmc-header-title"><strong>B 站嘴替小助手</strong><small>智能生成 · 审慎发布</small></span><span class="bllmc-collapse">−</span>
+            <span class="bllmc-header-title"><strong>B 站嘴替小助手</strong><small>AI 嘴替</small></span><span class="bllmc-collapse">−</span>
           </button>
           <div class="bllmc-header-tools">
             <button data-action="theme" type="button" title="切换主题" aria-label="切换主题">◐</button>
