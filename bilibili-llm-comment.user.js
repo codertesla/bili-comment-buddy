@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.0
+// @version      0.6.1
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.0',
+    version: '0.6.1',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -82,7 +82,7 @@
   const DEFAULT_PANEL_STATE = Object.freeze({
     collapsed: false,
     fabMode: false,
-    theme: 'auto',
+    theme: 'light',
     right: 18,
     bottom: 18,
   });
@@ -423,6 +423,12 @@
     getPanelState() {
       const saved = GM_getValue(this.keys.panelState, {});
       const state = saved && typeof saved === 'object' ? { ...saved } : {};
+      // 主题只接受 light/dark；首次运行或老的 auto 值按系统偏好解析为确定值。
+      if (state.theme !== 'light' && state.theme !== 'dark') {
+        const prefersDark = window.matchMedia
+          && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        state.theme = prefersDark ? 'dark' : 'light';
+      }
       return { ...DEFAULT_PANEL_STATE, ...state };
     },
     setPanelState(state) {
@@ -1058,10 +1064,9 @@
     }
 
     applyTheme(theme) {
-      const resolved = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : null;
-      this.panel?.setAttribute('data-bllmc-theme', resolved || 'auto');
-      this.fab?.setAttribute('data-bllmc-theme', resolved || 'auto');
-      document.documentElement.setAttribute('data-bllmc-theme-pref', theme);
+      const resolved = theme === 'dark' ? 'dark' : 'light';
+      this.panel?.setAttribute('data-bllmc-theme', resolved);
+      this.fab?.setAttribute('data-bllmc-theme', resolved);
     }
 
     applyPosition(right, bottom) {
@@ -1096,9 +1101,8 @@
       });
 
       panel.querySelector('[data-action="theme"]').addEventListener('click', () => {
-        const order = ['auto', 'light', 'dark'];
-        const cur = this.state.theme || 'auto';
-        const next = order[(order.indexOf(cur) + 1) % order.length];
+        const cur = this.state.theme === 'dark' ? 'dark' : 'light';
+        const next = cur === 'dark' ? 'light' : 'dark';
         this.applyTheme(next);
         this.controller.panelState = Store.setPanelState({ ...this.state, theme: next });
         this.controller.log(`主题已切换：${next}`);
@@ -1142,7 +1146,8 @@
     }
 
     _onDragStart(event) {
-      if (event.target.closest('button:not([data-action="collapse"])')) return;
+      // 任何按钮点击（collapse/theme/settings）都不启动拖动，避免吞掉 click。
+      if (event.target.closest('button')) return;
       const point = event.touches ? event.touches[0] : event;
       const panelRect = this.panel.getBoundingClientRect();
       this._dragState = {
@@ -1723,16 +1728,6 @@
       --bllmc-warn-border: rgba(240,206,122,.25);
       --bllmc-shadow: 0 18px 46px rgba(0,0,0,.5);
       --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
-    }
-    /* auto 主题跟随系统 */
-    @media (prefers-color-scheme: dark) {
-      #${APP.panelId}[data-bllmc-theme="auto"], #${APP.fabId}[data-bllmc-theme="auto"] {
-        --bllmc-bg: #202124; --bllmc-fg: #f1f2f3; --bllmc-muted: #b8bcc4; --bllmc-faint: #8a8f98;
-        --bllmc-border: #3a3d42; --bllmc-border-strong: #555b63; --bllmc-surface: #2b2d31; --bllmc-surface-2: #181a1f;
-        --bllmc-error: #ff6b8a; --bllmc-warn: #f0ce7a; --bllmc-success: #4eaf7a;
-        --bllmc-warn-bg: #3a3018; --bllmc-warn-fg: #f0ce7a; --bllmc-warn-border: rgba(240,206,122,.25);
-        --bllmc-shadow: 0 18px 46px rgba(0,0,0,.5); --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
-      }
     }
 
     /* ===== FAB 悬浮按钮 ===== */
