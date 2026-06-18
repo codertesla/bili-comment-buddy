@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.5.0
+// @version      0.5.1
 // @description  为当前 B 站视频生成可编辑的相关评论，默认测试模式，支持受限自动发布。
 // @author       codertesla
 // @match        https://www.bilibili.com/video/*
@@ -26,7 +26,7 @@
   const APP = Object.freeze({
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
-    version: '0.5.0',
+    version: '0.5.1',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -642,23 +642,28 @@
     },
     async ensureCommentAreaLoaded() {
       if (this.hasCommentEntry()) return false;
+      const prevScroll = this.captureScroll();
 
-      const anchor = this.findCommentAnchor();
-      if (anchor) {
-        anchor.scrollIntoView({ block: 'center', behavior: 'instant' });
-        if (await this.waitForCommentEntry(7000)) return true;
-      }
+      try {
+        const anchor = this.findCommentAnchor();
+        if (anchor) {
+          anchor.scrollIntoView({ block: 'center', behavior: 'instant' });
+          if (await this.waitForCommentEntry(7000)) return true;
+        }
 
-      const scroller = document.scrollingElement || document.documentElement;
-      const startY = window.scrollY;
-      const maxY = Math.max(0, scroller.scrollHeight - window.innerHeight);
-      for (let step = 1; step <= 7; step += 1) {
-        const y = Math.min(maxY, startY + window.innerHeight * 0.75 * step);
-        window.scrollTo({ left: window.scrollX, top: y, behavior: 'instant' });
-        if (await this.waitForCommentEntry(1200)) return true;
-        if (y >= maxY) break;
+        const scroller = document.scrollingElement || document.documentElement;
+        const startY = window.scrollY;
+        const maxY = Math.max(0, scroller.scrollHeight - window.innerHeight);
+        for (let step = 1; step <= 7; step += 1) {
+          const y = Math.min(maxY, startY + window.innerHeight * 0.75 * step);
+          window.scrollTo({ left: window.scrollX, top: y, behavior: 'instant' });
+          if (await this.waitForCommentEntry(1200)) return true;
+          if (y >= maxY) break;
+        }
+        return false;
+      } finally {
+        this.restoreScroll(prevScroll);
       }
-      return false;
     },
     validate(video, text, config, isAutomatic) {
       if (Page.hasRiskPrompt()) throw new Error('检测到验证码或风险提示，已停止发布流程。');
@@ -745,6 +750,7 @@
       try {
         const editor = await this.findEditor();
         this.fillEditor(editor, comment);
+        this.restoreScroll(prevScroll);
         return editor;
       } finally {
         this.restoreScroll(prevScroll);
@@ -756,12 +762,14 @@
       try {
         const editor = await this.findEditor();
         this.fillEditor(editor, comment);
+        this.restoreScroll(prevScroll);
         if (config.testMode) return { mode: 'test', message: '测试模式：已填入评论框，未点击发送。' };
         if (Page.hasRiskPrompt()) throw new Error('发送前检测到验证码或风险提示，已停止。');
         const sendButton = await this.waitForSendButton(editor);
         if (!sendButton) throw new Error('未找到评论发送按钮，页面结构可能已变化。评论已保留在输入框中。');
         if (sendButton.disabled || sendButton.getAttribute('aria-disabled') === 'true') throw new Error('发送按钮不可用，评论区可能受限。');
         sendButton.click();
+        this.restoreScroll(prevScroll);
         this.sessionPublishCount += 1;
         await Util.sleep(1800);
         if (Page.hasRiskPrompt()) throw new Error('发送后出现验证码或风险提示，已停止；请人工确认评论状态。');
