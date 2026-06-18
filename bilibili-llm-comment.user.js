@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.5.3
+// @version      0.6.0
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -29,7 +29,8 @@
   const APP = Object.freeze({
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
-    version: '0.5.3',
+    fabId: 'bllmc-fab',
+    version: '0.6.0',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -37,6 +38,9 @@
     maxCommentContextChars: 1800,
     minPublishIntervalMs: 10 * 60 * 1000,
     routeDebounceMs: 800,
+    commentMin: 20,
+    commentMax: 100,
+    dragThreshold: 4,
   });
 
   const COMMENT_STYLE_PRESETS = Object.freeze({
@@ -73,6 +77,14 @@
     dailyAutoPublishLimit: 5,
     autoPublish: false,
     testMode: true,
+  });
+
+  const DEFAULT_PANEL_STATE = Object.freeze({
+    collapsed: false,
+    fabMode: false,
+    theme: 'auto',
+    right: 18,
+    bottom: 18,
   });
 
   const SYSTEM_PROMPT = `你负责为 B 站视频撰写一条中文评论。严格遵守：
@@ -167,14 +179,50 @@
       }
       return null;
     },
+    // Shadow DOM root 缓存：避免每次调用都全量遍历 document。
+    // 缓存基于 document 元素树签名（子节点数 + 个别节点 hash），变化时重建。
+    _shadowCache: null,
+    _shadowCacheSignature: '',
+    _shadowSignature() {
+      const body = document.body;
+      if (!body) return '';
+      let sig = `${body.children.length}:${body.childElementCount}`;
+      let node = body.firstElementChild;
+      let i = 0;
+      while (node && i < 8) {
+        sig += `|${node.tagName}:${node.children.length}`;
+        node = node.nextElementSibling;
+        i += 1;
+      }
+      return sig;
+    },
     openRoots(root = document) {
+      if (root !== document) {
+        return this._openRootsRaw(root);
+      }
+      const sig = this._shadowSignature();
+      if (this._shadowCache && this._shadowCacheSignature === sig) {
+        return this._shadowCache;
+      }
+      const roots = this._openRootsRaw(root);
+      this._shadowCache = roots;
+      this._shadowCacheSignature = sig;
+      return roots;
+    },
+    _openRootsRaw(root) {
       const roots = [root];
       for (let index = 0; index < roots.length; index += 1) {
-        for (const element of roots[index].querySelectorAll('*')) {
+        const current = roots[index];
+        if (!current.querySelectorAll) continue;
+        for (const element of current.querySelectorAll('*')) {
           if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
         }
       }
       return roots;
+    },
+    invalidateShadowCache() {
+      this._shadowCache = null;
+      this._shadowCacheSignature = '';
     },
     findFirstDeep(selectors, root = document) {
       for (const currentRoot of this.openRoots(root)) {
@@ -242,40 +290,61 @@
         observer.observe(document.documentElement, { childList: true, subtree: true });
       });
     },
+    // 基于 MutationObserver 的 Shadow DOM 等待，替代原 setInterval 轮询。
     waitForAnyDeep(selectors, timeoutMs = 10000) {
       return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
-        const check = () => {
+        const found = this.findFirstDeep(selectors);
+        if (found) return resolve(found);
+        let settled = false;
+        const observer = new MutationObserver(() => {
+          this.invalidateShadowCache();
+          if (settled) return;
           const element = this.findFirstDeep(selectors);
           if (element) {
+            settled = true;
             cleanup();
             resolve(element);
-          } else if (Date.now() - startedAt >= timeoutMs) {
-            cleanup();
-            reject(new Error(`等待 Shadow DOM 页面元素超时：${selectors.join(', ')}`));
           }
+        });
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(`等待 Shadow DOM 页面元素超时：${selectors.join(', ')}`));
+        }, timeoutMs);
+        const cleanup = () => {
+          observer.disconnect();
+          window.clearTimeout(timer);
         };
-        const timer = window.setInterval(check, 300);
-        const cleanup = () => window.clearInterval(timer);
-        check();
+        observer.observe(document.documentElement, { childList: true, subtree: true });
       });
     },
     waitForAnyVisibleDeep(selectors, timeoutMs = 10000) {
       return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
-        const check = () => {
+        const existing = this.findFirstVisibleDeep(selectors);
+        if (existing) return resolve(existing);
+        let settled = false;
+        const observer = new MutationObserver(() => {
+          this.invalidateShadowCache();
+          if (settled) return;
           const element = this.findFirstVisibleDeep(selectors);
           if (element) {
+            settled = true;
             cleanup();
             resolve(element);
-          } else if (Date.now() - startedAt >= timeoutMs) {
-            cleanup();
-            reject(new Error(`等待可见的 Shadow DOM 页面元素超时：${selectors.join(', ')}`));
           }
+        });
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error(`等待可见的 Shadow DOM 页面元素超时：${selectors.join(', ')}`));
+        }, timeoutMs);
+        const cleanup = () => {
+          observer.disconnect();
+          window.clearTimeout(timer);
         };
-        const timer = window.setInterval(check, 300);
-        const cleanup = () => window.clearInterval(timer);
-        check();
+        observer.observe(document.documentElement, { childList: true, subtree: true });
       });
     },
   };
@@ -285,6 +354,7 @@
       config: 'bllmc_config_v1',
       processed: 'bllmc_processed_v1',
       publishStats: 'bllmc_publish_stats_v1',
+      panelState: 'bllmc_panel_state_v1',
     }),
     getConfig() {
       const saved = GM_getValue(this.keys.config, {});
@@ -350,6 +420,16 @@
         date: Util.dateKey(), count: stats.count + 1, lastPublishedAt: Date.now(),
       });
     },
+    getPanelState() {
+      const saved = GM_getValue(this.keys.panelState, {});
+      const state = saved && typeof saved === 'object' ? { ...saved } : {};
+      return { ...DEFAULT_PANEL_STATE, ...state };
+    },
+    setPanelState(state) {
+      const safe = { ...DEFAULT_PANEL_STATE, ...state };
+      GM_setValue(this.keys.panelState, safe);
+      return safe;
+    },
   };
 
   const Page = {
@@ -362,7 +442,16 @@
     isDiscoveryPage() {
       return location.hostname === 't.bilibili.com'
         || /\/dynamic(?:\/|$)/.test(location.pathname)
-        || /\/video(?:\/|$)/.test(location.pathname) && location.hostname === 'space.bilibili.com';
+        || (/\/video(?:\/|$)/.test(location.pathname) && location.hostname === 'space.bilibili.com');
+    },
+    // 分级挂载核心：决定本页应该以何种形态出现。
+    // 'video'     -> 完整面板（默认展开）
+    // 'discovery' -> 仅 FAB（点击展开为完整面板）
+    // 'unsupported' -> 不挂载
+    pageType() {
+      if (this.isVideoPage()) return 'video';
+      if (this.isDiscoveryPage()) return 'discovery';
+      return 'unsupported';
     },
     hasRiskPrompt() {
       const element = Util.findFirst(SELECTORS.riskIndicators);
@@ -430,13 +519,10 @@
     },
     /** Resolve the numeric aid for the current video (needed by the comment API). */
     async getAid(bvid) {
-      // 1. Try __INITIAL_STATE__ first (instant, no request).
       const state = this.initialState();
       if (state?.aid) return state.aid;
-      // 2. Try data-aid attribute on the page.
       const aidAttr = document.querySelector('[data-aid]')?.dataset?.aid;
       if (aidAttr && Number(aidAttr)) return Number(aidAttr);
-      // 3. Fallback: call B站 view API to convert bvid → aid.
       try {
         const data = await this.gmFetch(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
         if (data?.data?.aid) return data.data.aid;
@@ -492,7 +578,6 @@
       if (!Page.isVideoPage()) throw new Error('当前不是可识别的 B 站视频页。');
       await Util.waitForAny(SELECTORS.title, 12000);
 
-      // Collect metadata from multiple sources for robustness.
       const ldData = this.jsonLd();
       const stateData = this.initialState();
       const title = Util.readElement(Util.findFirst(SELECTORS.title))
@@ -505,7 +590,6 @@
       if (!title) throw new Error('未找到视频标题，B 站页面结构可能已变化。');
       if (!uploader) throw new Error('未找到 UP 主名称，B 站页面结构可能已变化。');
 
-      // Fetch comments: prefer API (reliable, no scrolling), then DOM fallback.
       const aid = await this.getAid(bvid);
       let comments = await this.fetchCommentsViaAPI(aid);
       let commentsSource = comments.length ? 'API' : 'none';
@@ -596,11 +680,47 @@
         return this.request(config, video, attempt + 1);
       });
     },
+    // 设置弹窗“测试连接”用：发送一个极小请求验证 endpoint / key / model 是否可用。
+    testConnection(config) {
+      const endpoint = this.endpoint(config.baseUrl);
+      const payload = {
+        model: config.model.trim(),
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      };
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: endpoint,
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey.trim()}` },
+          data: JSON.stringify(payload),
+          timeout: 15000,
+          onload: (response) => {
+            if (response.status < 200 || response.status >= 300) {
+              const detail = response.responseText ? Util.truncate(response.responseText, 200) : '无响应正文';
+              reject(new Error(`HTTP ${response.status}：${detail}`));
+              return;
+            }
+            try {
+              const data = JSON.parse(response.responseText);
+              const modelEcho = data?.model || config.model;
+              resolve(`连接正常，模型回显：${modelEcho}`);
+            } catch (e) {
+              reject(new Error(`响应解析失败：${e.message}`));
+            }
+          },
+          ontimeout: () => reject(new Error('测试请求超时。')),
+          onerror: () => reject(new Error('网络请求失败。')),
+        });
+      });
+    },
     validate(content) {
       let text = Util.normalizeText(content).replace(/^(?:```\w*|[“"']+)|(?:```|[”"']+)$/g, '').trim();
       if (!text) throw new Error('LLM 未返回评论正文。');
       if (/作为(?:一个)?AI|语言模型/i.test(text)) throw new Error('LLM 返回了禁止的 AI 自述，请重新生成。');
-      if (text.length < 20 || text.length > 100) throw new Error(`LLM 评论长度为 ${text.length}，要求 20～100 字。`);
+      if (text.length < APP.commentMin || text.length > APP.commentMax) {
+        throw new Error(`LLM 评论长度为 ${text.length}，要求 ${APP.commentMin}～${APP.commentMax} 字。`);
+      }
       if (/\n/.test(text)) text = text.replace(/\s+/g, ' ');
       return text;
     },
@@ -617,9 +737,10 @@
     },
     isOwnPanelElement(element) {
       const panel = document.getElementById(APP.panelId);
+      const fab = document.getElementById(APP.fabId);
       let current = element;
       while (current) {
-        if (current === panel) return true;
+        if (current === panel || current === fab) return true;
         const root = current.getRootNode?.();
         current = root?.host || current.parentElement;
       }
@@ -699,7 +820,6 @@
       editor = Util.findFirstVisibleDeep(SELECTORS.commentEditors);
       if (!editor) {
         const activator = await Util.waitForAnyVisibleDeep(SELECTORS.commentActivators, 10000);
-        // Preserve scroll position so the activator click does not jump the page.
         const prevScroll = { x: window.scrollX, y: window.scrollY };
         activator.click();
         window.scrollTo({ left: prevScroll.x, top: prevScroll.y, behavior: 'instant' });
@@ -789,27 +909,77 @@
     },
   };
 
-  const UI = {
-    elements: {},
-    currentVideo: null,
-    busy: false,
-    config: Store.getConfig(),
-    logs: [],
-    settingsCleanup: null,
-    mount() {
+  // ============== 视图层：浮动面板 ==============
+  class PanelView {
+    constructor(controller) {
+      this.controller = controller;
+      this.elements = {};
+      this.panel = null;
+      this.fab = null;
+      this._dragState = null;
+    }
+
+    get config() { return this.controller.config; }
+    get state() { return this.controller.panelState; }
+
+    // 根据 pageType 决定挂载形态。
+    mount(pageType) {
+      this.unmount();
+      if (pageType === 'unsupported') return;
+      this.buildFab();
+      if (pageType === 'video' && !this.state.fabMode) {
+        this.buildPanel();
+        this.applyCollapsed(this.state.collapsed);
+      } else {
+        // 动态页或用户上次收起为 FAB：只显示 FAB。
+        this.showFab();
+      }
+      this.applyTheme(this.state.theme);
+      this.applyPosition(this.state.right, this.state.bottom);
+      this.bindGlobal();
+    }
+
+    unmount() {
+      this.panel?.remove();
+      this.fab?.remove();
+      this.panel = null;
+      this.fab = null;
+      this.elements = {};
+    }
+
+    buildFab() {
+      if (document.getElementById(APP.fabId)) return;
+      const fab = document.createElement('button');
+      fab.id = APP.fabId;
+      fab.type = 'button';
+      fab.title = 'B 站嘴替小助手';
+      fab.setAttribute('aria-label', '打开 B 站嘴替小助手');
+      fab.innerHTML = '<span class="bllmc-fab-icon">嘴</span>';
+      document.body.appendChild(fab);
+      this.fab = fab;
+      fab.addEventListener('click', () => this.expandFromFab());
+    }
+
+    buildPanel() {
       document.getElementById(APP.panelId)?.remove();
       const panel = document.createElement('aside');
       panel.id = APP.panelId;
       panel.innerHTML = `
-        <div class="bllmc-header">
+        <div class="bllmc-header" data-role="dragHandle">
           <button data-action="collapse" type="button" aria-expanded="true">
             <span><strong>B 站嘴替小助手</strong><small>智能生成 · 审慎发布</small></span><span class="bllmc-collapse">−</span>
           </button>
-          <button data-action="settings" class="bllmc-settings-button" type="button" title="打开设置">设置</button>
+          <div class="bllmc-header-tools">
+            <button data-action="theme" type="button" title="切换主题" aria-label="切换主题">◐</button>
+            <button data-action="settings" type="button" title="设置">设置</button>
+          </div>
         </div>
         <div class="bllmc-body">
           <div class="bllmc-topline">
-            <span data-role="status">就绪</span>
+            <div class="bllmc-status-wrap">
+              <span data-role="status">就绪</span>
+              <button data-action="retry" type="button" class="bllmc-retry" hidden>重试</button>
+            </div>
             <button data-action="check" class="bllmc-secondary">检查视频</button>
           </div>
           <div class="bllmc-modebar">
@@ -823,7 +993,9 @@
             </div>
           </div>
           <section class="bllmc-section"><div class="bllmc-section-head"><h3>视频信息</h3></div><div data-role="video" class="bllmc-muted">尚未检查</div></section>
-          <section class="bllmc-section bllmc-comment-section"><div class="bllmc-section-head"><h3>评论草稿</h3></div><textarea data-field="comment" rows="4" placeholder="生成后可在此编辑"></textarea>
+          <section class="bllmc-section bllmc-comment-section">
+            <div class="bllmc-section-head"><h3>评论草稿</h3><span data-role="counter" class="bllmc-counter">0/100</span></div>
+            <textarea data-field="comment" rows="4" placeholder="生成后可在此编辑"></textarea>
             <div class="bllmc-actions"><button data-action="generate" class="bllmc-secondary">生成评论</button><button data-action="publish" data-role="publishButton" class="bllmc-primary">填入评论框</button></div>
           </section>
           <details data-role="logDetails" class="bllmc-details">
@@ -836,65 +1008,302 @@
           </details>
         </div>`;
       document.body.appendChild(panel);
+      this.panel = panel;
       this.cache(panel);
-      this.loadConfigIntoForm();
-      this.updateModeUI();
-      this.bind();
-      this.log(`脚本 v${APP.version} 已加载。`);
-      this.setStatus(Page.isVideoPage() ? '当前视频模式' : Page.isDiscoveryPage() ? '动态页发现模式' : '等待支持的页面');
-    },
+      this.bindPanel();
+    }
+
     cache(panel) {
       this.elements.panel = panel;
       panel.querySelectorAll('[data-role]').forEach((el) => { this.elements[el.dataset.role] = el; });
       panel.querySelectorAll('[data-field]').forEach((el) => { this.elements[el.dataset.field] = el; });
-    },
+    }
+
+    showFab() {
+      this.panel?.remove();
+      this.panel = null;
+      this.elements = {};
+      if (this.fab) this.fab.hidden = false;
+      const next = { ...this.state, fabMode: true };
+      this.controller.panelState = Store.setPanelState(next);
+    }
+
+    expandFromFab() {
+      this.buildPanel();
+      this.applyCollapsed(false);
+      this.applyTheme(this.state.theme);
+      this.applyPosition(this.state.right, this.state.bottom);
+      this.bindPanel();
+      this.controller.refreshFromState();
+      if (this.fab) this.fab.hidden = true;
+      const next = { ...this.state, fabMode: false, collapsed: false };
+      this.controller.panelState = Store.setPanelState(next);
+      this.controller.log(`面板已展开（v${APP.version}）。`);
+    }
+
+    collapseToFab() {
+      this.showFab();
+      this.controller.panelState = Store.setPanelState({ ...this.state, fabMode: true, collapsed: false });
+      this.controller.log('面板已收起为悬浮按钮。');
+    }
+
+    applyCollapsed(collapsed) {
+      if (!this.panel) return;
+      const body = this.panel.querySelector('.bllmc-body');
+      const btn = this.panel.querySelector('[data-action="collapse"]');
+      const icon = this.panel.querySelector('.bllmc-collapse');
+      body.classList.toggle('bllmc-body-collapsed', collapsed);
+      btn?.setAttribute('aria-expanded', String(!collapsed));
+      if (icon) icon.textContent = collapsed ? '+' : '−';
+    }
+
+    applyTheme(theme) {
+      const resolved = theme === 'dark' ? 'dark' : theme === 'light' ? 'light' : null;
+      this.panel?.setAttribute('data-bllmc-theme', resolved || 'auto');
+      this.fab?.setAttribute('data-bllmc-theme', resolved || 'auto');
+      document.documentElement.setAttribute('data-bllmc-theme-pref', theme);
+    }
+
+    applyPosition(right, bottom) {
+      if (!this.panel) return;
+      const r = Math.max(0, Number(right) || 0);
+      const b = Math.max(0, Number(bottom) || 0);
+      this.panel.style.right = `${r}px`;
+      this.panel.style.bottom = `${b}px`;
+      if (this.fab) {
+        this.fab.style.right = `${r}px`;
+        this.fab.style.bottom = `${b}px`;
+      }
+    }
+
+    bindGlobal() {
+      if (this.fab) {
+        this.fab.addEventListener('click', () => this.expandFromFab());
+      }
+    }
+
+    bindPanel() {
+      const panel = this.panel;
+      if (!panel) return;
+
+      panel.querySelector('[data-action="collapse"]').addEventListener('click', (event) => {
+        if (this._dragMoved) return;
+        const body = panel.querySelector('.bllmc-body');
+        const collapsed = body.classList.toggle('bllmc-body-collapsed');
+        event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
+        panel.querySelector('.bllmc-collapse').textContent = collapsed ? '+' : '−';
+        this.controller.panelState = Store.setPanelState({ ...this.state, collapsed });
+      });
+
+      panel.querySelector('[data-action="theme"]').addEventListener('click', () => {
+        const order = ['auto', 'light', 'dark'];
+        const cur = this.state.theme || 'auto';
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        this.applyTheme(next);
+        this.controller.panelState = Store.setPanelState({ ...this.state, theme: next });
+        this.controller.log(`主题已切换：${next}`);
+      });
+
+      panel.querySelector('[data-action="settings"]').addEventListener('click', () => {
+        this.controller.openSettings();
+      });
+      panel.querySelector('[data-action="check"]').addEventListener('click', () => {
+        this.controller.run(() => this.controller.check());
+      });
+      panel.querySelector('[data-action="generate"]').addEventListener('click', () => {
+        this.controller.run(() => this.controller.generate());
+      });
+      panel.querySelector('[data-action="publish"]').addEventListener('click', () => {
+        this.controller.run(() => this.controller.publish(false));
+      });
+      panel.querySelector('[data-action="retry"]').addEventListener('click', () => {
+        this.controller.retryLast();
+      });
+      panel.querySelector('[data-action="copyLogs"]').addEventListener('click', () => this.controller.copyLogs());
+      panel.querySelector('[data-action="clearLogs"]').addEventListener('click', () => {
+        this.controller.clearLogs();
+      });
+
+      panel.querySelectorAll('[data-field]:not([data-field="comment"])').forEach((input) => {
+        input.addEventListener('change', () => {
+          this.controller.onConfigFieldChange(input.dataset.field);
+        });
+      });
+
+      this.elements.comment.addEventListener('input', () => this.updateCounter());
+
+      this.bindDrag(panel.querySelector('[data-role="dragHandle"]'));
+    }
+
+    bindDrag(handle) {
+      if (!handle || !this.panel) return;
+      handle.addEventListener('mousedown', (event) => this._onDragStart(event));
+      handle.addEventListener('touchstart', (event) => this._onDragStart(event), { passive: false });
+    }
+
+    _onDragStart(event) {
+      if (event.target.closest('button:not([data-action="collapse"])')) return;
+      const point = event.touches ? event.touches[0] : event;
+      const panelRect = this.panel.getBoundingClientRect();
+      this._dragState = {
+        startX: point.clientX,
+        startY: point.clientY,
+        startRight: window.innerWidth - panelRect.right,
+        startBottom: window.innerHeight - panelRect.bottom,
+      };
+      this._dragMoved = false;
+      const onMove = (e) => this._onDragMove(e);
+      const onEnd = () => this._onDragEnd(onMove, onEnd);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onEnd);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onEnd);
+    }
+
+    _onDragMove(event) {
+      if (!this._dragState) return;
+      const point = event.touches ? event.touches[0] : event;
+      const dx = point.clientX - this._dragState.startX;
+      const dy = point.clientY - this._dragState.startY;
+      if (!this._dragMoved && Math.hypot(dx, dy) < APP.dragThreshold) return;
+      this._dragMoved = true;
+      if (event.cancelable) event.preventDefault();
+      let right = this._dragState.startRight - dx;
+      let bottom = this._dragState.startBottom - dy;
+      const maxRight = window.innerWidth - 80;
+      const maxBottom = window.innerHeight - 80;
+      right = Math.max(0, Math.min(maxRight, right));
+      bottom = Math.max(0, Math.min(maxBottom, bottom));
+      this.applyPosition(right, bottom);
+    }
+
+    _onDragEnd(onMove, onEnd) {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+      if (this._dragMoved && this.panel) {
+        const rect = this.panel.getBoundingClientRect();
+        const right = Math.round(window.innerWidth - rect.right);
+        const bottom = Math.round(window.innerHeight - rect.bottom);
+        this.controller.panelState = Store.setPanelState({ ...this.state, right, bottom });
+      }
+      this._dragState = null;
+      this._dragMoved = false;
+    }
+
+    updateCounter() {
+      if (!this.elements.counter) return;
+      const len = this.elements.comment.value.length;
+      this.elements.counter.textContent = `${len}/${APP.commentMax}`;
+      this.elements.counter.classList.toggle('bllmc-counter-over', len > APP.commentMax);
+      this.elements.counter.classList.toggle('bllmc-counter-ok', len >= APP.commentMin && len <= APP.commentMax);
+    }
+
     loadConfigIntoForm() {
+      const cfg = this.config;
       for (const key of Object.keys(DEFAULT_CONFIG)) {
         const input = this.elements[key];
         if (!input) continue;
-        if (input.type === 'checkbox') input.checked = Boolean(this.config[key]);
-        else input.value = this.config[key];
+        if (input.type === 'checkbox') input.checked = Boolean(cfg[key]);
+        else input.value = cfg[key];
       }
-    },
-    readAndSaveConfig() {
-      this.config = Store.setConfig({
-        ...this.config,
-        autoPublish: this.elements.autoPublish.checked,
-        testMode: this.elements.testMode.checked,
-      });
+    }
+
+    updateModeUI() {
+      if (!this.elements.publishButton) return;
+      const testMode = this.elements.testMode.checked;
+      const autoPublish = this.elements.autoPublish.checked;
+      this.elements.publishButton.textContent = testMode ? '填入评论框' : '立即发布';
+      if (testMode) {
+        this.elements.modeHint.textContent = autoPublish
+          ? '测试：只填入，自动发布暂停。'
+          : '测试：只填入，不发送。';
+      } else {
+        this.elements.modeHint.textContent = autoPublish
+          ? '实发：生成后直接发布。'
+          : '实发：点击后直接发送。';
+      }
+      this.elements.modeHint.classList.toggle('bllmc-live-mode', !testMode);
       this.updateQuotaUI();
-      return this.config;
-    },
-    bind() {
-      const panel = this.elements.panel;
-      panel.querySelector('[data-action="collapse"]').addEventListener('click', (event) => {
-        const body = panel.querySelector('.bllmc-body');
-        const isExpanded = body.classList.toggle('bllmc-body-collapsed');
-        event.currentTarget.setAttribute('aria-expanded', String(!isExpanded));
-        panel.querySelector('.bllmc-collapse').textContent = isExpanded ? '+' : '−';
-      });
-      panel.querySelector('[data-action="settings"]').addEventListener('click', () => this.openSettings());
-      panel.querySelector('[data-action="check"]').addEventListener('click', () => this.run(() => this.check()));
-      panel.querySelector('[data-action="generate"]').addEventListener('click', () => this.run(() => this.generate()));
-      panel.querySelector('[data-action="publish"]').addEventListener('click', () => this.run(() => this.publish(false)));
-      panel.querySelector('[data-action="copyLogs"]').addEventListener('click', () => this.copyLogs());
-      panel.querySelector('[data-action="clearLogs"]').addEventListener('click', () => {
-        this.logs = [];
-        this.elements.logs.textContent = '';
-      });
-      panel.querySelectorAll('[data-field]:not([data-field="comment"])').forEach((input) => {
-        input.addEventListener('change', () => {
-          const previous = this.config;
-          const next = this.readAndSaveConfig();
-          if (input.dataset.field === 'autoPublish' && next.autoPublish && !previous.autoPublish) {
-            this.log('自动发布已开启；仅在关闭测试模式后生效。', 'warn');
-          }
-          this.updateModeUI();
-        });
-      });
-    },
-    openSettings() {
-      this.settingsCleanup?.();
+    }
+
+    updateQuotaUI() {
+      if (!this.elements.quota) return;
+      const stats = Store.getPublishStats();
+      this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit} · ≥ 10 分钟`;
+    }
+
+    setBusy(busy) {
+      if (!this.panel) return;
+      this.panel.classList.toggle('bllmc-busy', busy);
+      const buttons = Array.from(this.panel.querySelectorAll('.bllmc-body button'));
+      buttons.forEach((button) => { button.disabled = busy; });
+    }
+
+    showRetry(show) {
+      if (this.elements.retry) this.elements.retry.hidden = !show;
+    }
+
+    setStatus(text, isError = false) {
+      if (!this.elements.status) return;
+      this.elements.status.textContent = text;
+      this.elements.status.classList.toggle('bllmc-error', isError);
+    }
+
+    renderLogs(logsHtml) {
+      if (this.elements.logs) this.elements.logs.innerHTML = logsHtml;
+    }
+
+    openLogDetails() {
+      if (this.elements.logDetails) this.elements.logDetails.open = true;
+    }
+
+    renderVideo(video) {
+      if (!this.elements.video) return;
+      this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
+        <div class="bllmc-video-meta"><span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span><span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span><span class="bllmc-badge">${video.comments.length} 条评论上下文</span></div>
+        <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
+    }
+
+    renderDiscovery(video) {
+      if (!this.elements.video) return;
+      this.elements.video.innerHTML = `<strong>${Util.escapeHtml(video.title)}</strong>
+        <div>${Util.escapeHtml(video.uploader || 'UP 主待进入视频页识别')} · ${Util.escapeHtml(video.bvid)}</div>
+        <a class="bllmc-open" href="${Util.escapeHtml(video.url)}">打开视频并继续</a>`;
+    }
+
+    setVideoPlaceholder(text) {
+      if (this.elements.video) this.elements.video.textContent = text;
+    }
+
+    clearComment() {
+      if (this.elements.comment) {
+        this.elements.comment.value = '';
+        this.updateCounter();
+      }
+    }
+
+    setComment(text) {
+      if (this.elements.comment) {
+        this.elements.comment.value = text;
+        this.updateCounter();
+      }
+    }
+  }
+
+  // ============== 视图层：设置弹窗 ==============
+  class SettingsView {
+    constructor(controller) {
+      this.controller = controller;
+      this.overlay = null;
+      this.cleanup = null;
+    }
+
+    get config() { return this.controller.config; }
+
+    open() {
+      this.close();
       const overlay = document.createElement('div');
       const styleOptions = Object.entries(COMMENT_STYLE_PRESETS)
         .map(([value, preset]) => `<option value="${value}">${Util.escapeHtml(preset.label)}</option>`)
@@ -924,6 +1333,10 @@
               </div>
               <label>风格提示词<textarea data-setting="style" rows="4"></textarea></label>
             </div>
+            <div class="bllmc-settings-test">
+              <button data-settings-action="test" type="button" class="bllmc-secondary">测试连接</button>
+              <span data-settings-role="testResult" class="bllmc-settings-test-result"></span>
+            </div>
             <div class="bllmc-warning">API Key 保存在 Tampermonkey 脚本配置中，建议使用限额且可撤销的专用 Key。</div>
             <div data-settings-role="error" class="bllmc-settings-error"></div>
           </div>
@@ -933,6 +1346,8 @@
           </div>
         </div>`;
       document.body.appendChild(overlay);
+      this.overlay = overlay;
+
       for (const key of ['baseUrl', 'model', 'apiKey', 'temperature', 'stylePreset', 'dailyAutoPublishLimit', 'style']) {
         overlay.querySelector(`[data-setting="${key}"]`).value = this.config[key];
       }
@@ -947,156 +1362,188 @@
           presetSelect.value = 'custom';
         }
       });
-      const close = () => {
-        overlay.remove();
-        document.removeEventListener('keydown', onKeydown);
-        if (this.settingsCleanup === close) this.settingsCleanup = null;
-      };
+
+      const close = () => this.close();
       const onKeydown = (event) => { if (event.key === 'Escape') close(); };
       overlay.querySelector('[data-settings-action="close"]').addEventListener('click', close);
       overlay.querySelector('[data-settings-action="cancel"]').addEventListener('click', close);
       overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
-      overlay.querySelector('[data-settings-action="save"]').addEventListener('click', () => {
-        const next = {
-          ...this.config,
-          baseUrl: overlay.querySelector('[data-setting="baseUrl"]').value.trim(),
-          model: overlay.querySelector('[data-setting="model"]').value.trim(),
-          apiKey: overlay.querySelector('[data-setting="apiKey"]').value.trim(),
-          temperature: Number(overlay.querySelector('[data-setting="temperature"]').value),
-          stylePreset: overlay.querySelector('[data-setting="stylePreset"]').value,
-          dailyAutoPublishLimit: Number(overlay.querySelector('[data-setting="dailyAutoPublishLimit"]').value),
-          style: overlay.querySelector('[data-setting="style"]').value.trim(),
-        };
-        const errorElement = overlay.querySelector('[data-settings-role="error"]');
-        try {
-          LLM.endpoint(next.baseUrl);
-          if (!next.model) throw new Error('模型名称不能为空。');
-          if (!next.style) throw new Error('评论风格不能为空。');
-          if (!Number.isFinite(next.dailyAutoPublishLimit) || next.dailyAutoPublishLimit < 1) {
-            throw new Error('每日自动评论上限必须至少为 1。');
-          }
-          this.config = Store.setConfig(next);
-          this.updateQuotaUI();
-          this.log('API 与生成设置已保存。', 'success');
-          close();
-        } catch (error) {
-          errorElement.textContent = error.message;
-        }
-      });
-      this.settingsCleanup = close;
+
+      overlay.querySelector('[data-settings-action="test"]').addEventListener('click', () => this._onTest());
+      overlay.querySelector('[data-settings-action="save"]').addEventListener('click', () => this._onSave());
+
       document.addEventListener('keydown', onKeydown);
+      this.cleanup = () => {
+        document.removeEventListener('keydown', onKeydown);
+        this.overlay = null;
+      };
       overlay.querySelector('[data-setting="baseUrl"]').focus();
-    },
-    updateModeUI() {
-      const testMode = this.elements.testMode.checked;
-      const autoPublish = this.elements.autoPublish.checked;
-      this.elements.publishButton.textContent = testMode ? '填入评论框' : '立即发布';
-      if (testMode) {
-        this.elements.modeHint.textContent = autoPublish
-          ? '测试：只填入，自动发布暂停。'
-          : '测试：只填入，不发送。';
-      } else {
-        this.elements.modeHint.textContent = autoPublish
-          ? '实发：生成后直接发布。'
-          : '实发：点击后直接发送。';
+    }
+
+    close() {
+      if (this.overlay) {
+        this.overlay.remove();
+        this.overlay = null;
       }
-      this.elements.modeHint.classList.toggle('bllmc-live-mode', !testMode);
-      this.updateQuotaUI();
-    },
-    updateQuotaUI() {
-      if (!this.elements.quota) return;
-      const stats = Store.getPublishStats();
-      this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit} · ≥ 10 分钟`;
-    },
-    async run(operation) {
-      if (this.busy) return;
-      this.busy = true;
-      this.elements.panel.classList.add('bllmc-busy');
-      const busyButtons = Array.from(this.elements.panel.querySelectorAll('.bllmc-body button'));
-      busyButtons.forEach((button) => { button.disabled = true; });
+      if (this.cleanup) {
+        this.cleanup();
+        this.cleanup = null;
+      }
+    }
+
+    _collect() {
+      const overlay = this.overlay;
+      return {
+        ...this.config,
+        baseUrl: overlay.querySelector('[data-setting="baseUrl"]').value.trim(),
+        model: overlay.querySelector('[data-setting="model"]').value.trim(),
+        apiKey: overlay.querySelector('[data-setting="apiKey"]').value.trim(),
+        temperature: Number(overlay.querySelector('[data-setting="temperature"]').value),
+        stylePreset: overlay.querySelector('[data-setting="stylePreset"]').value,
+        dailyAutoPublishLimit: Number(overlay.querySelector('[data-setting="dailyAutoPublishLimit"]').value),
+        style: overlay.querySelector('[data-setting="style"]').value.trim(),
+      };
+    }
+
+    _onSave() {
+      const next = this._collect();
+      const errorElement = this.overlay.querySelector('[data-settings-role="error"]');
       try {
-        await operation();
+        LLM.endpoint(next.baseUrl);
+        if (!next.model) throw new Error('模型名称不能为空。');
+        if (!next.style) throw new Error('评论风格不能为空。');
+        if (!Number.isFinite(next.dailyAutoPublishLimit) || next.dailyAutoPublishLimit < 1) {
+          throw new Error('每日自动评论上限必须至少为 1。');
+        }
+        this.controller.config = Store.setConfig(next);
+        this.controller.view.updateQuotaUI();
+        this.controller.log('API 与生成设置已保存。', 'success');
+        errorElement.textContent = '';
+        this.close();
       } catch (error) {
-        console.error(APP.prefix, error);
-        this.setStatus('操作失败', true);
-        this.log(error.message || String(error), 'error');
+        errorElement.textContent = error.message;
+      }
+    }
+
+    async _onTest() {
+      const next = this._collect();
+      const resultEl = this.overlay.querySelector('[data-settings-role="testResult"]');
+      const btn = this.overlay.querySelector('[data-settings-action="test"]');
+      try {
+        LLM.endpoint(next.baseUrl);
+        if (!next.model) throw new Error('请先填写模型名称。');
+        if (!next.apiKey) throw new Error('请先填写 API Key。');
+        btn.disabled = true;
+        resultEl.textContent = '正在测试…';
+        resultEl.className = 'bllmc-settings-test-result bllmc-settings-test-pending';
+        const msg = await LLM.testConnection(next);
+        resultEl.textContent = msg;
+        resultEl.className = 'bllmc-settings-test-result bllmc-settings-test-ok';
+      } catch (error) {
+        resultEl.textContent = error.message || String(error);
+        resultEl.className = 'bllmc-settings-test-result bllmc-settings-test-fail';
       } finally {
-        this.busy = false;
-        this.elements.panel.classList.remove('bllmc-busy');
-        busyButtons.forEach((button) => { button.disabled = false; });
+        btn.disabled = false;
       }
-    },
-    async check() {
-      this.readAndSaveConfig();
-      if (Page.isVideoPage()) {
-        this.setStatus('正在提取视频信息…');
-        const video = await Extractor.currentVideo();
-        this.currentVideo = video;
-        this.renderVideo(video);
-        const suffix = Store.isProcessed(video.bvid) ? '（已处理）' : '';
-        this.setStatus(`已识别 ${video.bvid}${suffix}`);
-        const sourceText = video.commentsSource === 'API' ? 'API 热门评论'
-          : video.commentsSource === 'DOM' ? '页面 DOM 评论' : '无评论上下文';
-        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）。`);
-        if (Store.isProcessed(video.bvid)) this.log('该 BV 号已有处理记录，不会重复发布。', 'warn');
+    }
+  }
+
+  // ============== 控制器：编排业务流程 ==============
+  class Controller {
+    constructor() {
+      this.config = Store.getConfig();
+      this.panelState = Store.getPanelState();
+      this.view = new PanelView(this);
+      this.settings = new SettingsView(this);
+      this.currentVideo = null;
+      this.busy = false;
+      this.logs = [];
+      this.lastOperation = null;
+    }
+
+    init() {
+      const pageType = Page.pageType();
+      if (pageType === 'unsupported') {
+        console.info(APP.prefix, '当前页面不在支持范围内，脚本不挂载面板。');
         return;
       }
-      if (Page.isDiscoveryPage()) {
-        this.setStatus('正在扫描当前页面…');
-        const video = Discovery.newestUnprocessed();
-        if (!video) throw new Error('当前已渲染区域未发现未处理的视频链接；可向下滚动加载更多后重试。');
-        this.currentVideo = null;
-        this.renderDiscovery(video);
-        this.setStatus(`发现 ${video.bvid}`);
-        this.log('发现功能仅扫描当前页面已渲染内容；打开视频后才能提取简介和评论。');
-        return;
+      this.view.mount(pageType);
+      this.view.loadConfigIntoForm();
+      this.view.updateModeUI();
+      this.bindRouteObserver();
+      this.log(`脚本 v${APP.version} 已加载。`);
+      this.setStatus(pageType === 'video' ? '当前视频模式' : pageType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
+    }
+
+    bindRouteObserver() {
+      let lastUrl = location.href;
+      let routeTimer = 0;
+      const observer = new MutationObserver(() => {
+        if (location.href === lastUrl) return;
+        lastUrl = location.href;
+        window.clearTimeout(routeTimer);
+        routeTimer = window.setTimeout(() => {
+          Util.invalidateShadowCache();
+          // 页面类型可能变化（如动态页点进视频页），重新分级挂载。
+          const nextType = Page.pageType();
+          const cur = Page.pageType();
+          this.currentVideo = null;
+          this.view.clearComment();
+          this.view.setVideoPlaceholder('页面已切换，请重新检查');
+          this.setStatus('检测到 SPA 页面切换');
+          this.log('URL 已变化，已清除当前视频上下文。');
+          // 若页面类型变化，重新挂载。
+          if (nextType !== this._mountedType) {
+            this.view.mount(nextType);
+            this.view.loadConfigIntoForm();
+            this.view.updateModeUI();
+            this._mountedType = nextType;
+            this.setStatus(nextType === 'video' ? '当前视频模式'
+              : nextType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
+          }
+        }, APP.routeDebounceMs);
+      });
+      this._mountedType = Page.pageType();
+      this._routeObserver = observer;
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      this._routeTimer = routeTimer;
+      window.addEventListener('pagehide', () => this.cleanup(), { once: true });
+    }
+
+    cleanup() {
+      this._routeObserver?.disconnect();
+      this.view.unmount();
+      this.settings.close();
+    }
+
+    refreshFromState() {
+      this.view.loadConfigIntoForm();
+      this.view.updateModeUI();
+      this.view.updateCounter();
+    }
+
+    onConfigFieldChange(field) {
+      const previous = this.config;
+      this.config = Store.setConfig({
+        ...this.config,
+        autoPublish: this.view.elements.autoPublish.checked,
+        testMode: this.view.elements.testMode.checked,
+      });
+      if (field === 'autoPublish' && this.config.autoPublish && !previous.autoPublish) {
+        this.log('自动发布已开启；仅在关闭测试模式后生效。', 'warn');
       }
-      throw new Error('此页面不支持视频识别或动态发现。');
-    },
-    async generate() {
-      const config = this.readAndSaveConfig();
-      if (!this.currentVideo || this.currentVideo.bvid !== Page.getBvid()) await this.check();
-      if (!this.currentVideo) throw new Error('请先打开发现的视频，再生成评论。');
-      if (Store.isProcessed(this.currentVideo.bvid)) throw new Error('该视频已处理，拒绝再次生成发布流程。');
-      if (!config.apiKey) {
-        this.openSettings();
-        throw new Error('请先在设置页面填写 API Key。');
-      }
-      if (!config.model) throw new Error('请填写模型名称。');
-      this.setStatus('正在调用 LLM…');
-      const comment = await LLM.request(config, this.currentVideo);
-      this.elements.comment.value = comment;
-      this.setStatus('评论已生成，可编辑');
-      this.log(`生成完成，共 ${comment.length} 字。`);
-      if (config.autoPublish && !config.testMode) {
-        this.log('满足自动发布开关条件，正在执行限频检查。', 'warn');
-        await this.publish(true);
-      }
-    },
-    async publish(isAutomatic) {
-      const config = this.readAndSaveConfig();
-      if (!this.currentVideo) throw new Error('请先在当前视频页检查视频信息。');
-      const text = this.elements.comment.value;
-      this.setStatus(config.testMode ? '正在填入评论框…' : '正在准备发布…');
-      const result = await Publisher.publish(this.currentVideo, text, config, isAutomatic);
-      this.setStatus(result.message);
-      this.log(result.message, result.mode === 'published' ? 'success' : 'info');
-      this.updateQuotaUI();
-    },
-    renderVideo(video) {
-      this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
-        <div class="bllmc-video-meta"><span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span><span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span><span class="bllmc-badge">${video.comments.length} 条评论上下文</span></div>
-        <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
-    },
-    renderDiscovery(video) {
-      this.elements.video.innerHTML = `<strong>${Util.escapeHtml(video.title)}</strong>
-        <div>${Util.escapeHtml(video.uploader || 'UP 主待进入视频页识别')} · ${Util.escapeHtml(video.bvid)}</div>
-        <a class="bllmc-open" href="${Util.escapeHtml(video.url)}">打开视频并继续</a>`;
-    },
+      this.view.updateModeUI();
+    }
+
+    openSettings() {
+      this.settings.open();
+    }
+
     setStatus(text, isError = false) {
-      this.elements.status.textContent = text;
-      this.elements.status.classList.toggle('bllmc-error', isError);
-    },
+      this.view.setStatus(text, isError);
+      this.view.showRetry(isError);
+    }
+
     log(message, level = 'info') {
       const LEVELS = { info: 1, warn: 1, error: 1, success: 1 };
       const safeLevel = LEVELS[level] ? level : 'info';
@@ -1108,13 +1555,20 @@
       const ss = String(now.getSeconds()).padStart(2, '0');
       this.logs.unshift({ time: `${hh}:${mm}:${ss}`, message: safeMessage, level: safeLevel });
       this.logs = this.logs.slice(0, 40);
-      this.elements.logs.innerHTML = this.logs.map((item) =>
-        `<div class="bllmc-log-${item.level}">[${item.time}] ${Util.escapeHtml(item.message)}</div>`).join('');
-      if (safeLevel === 'error') this.elements.logDetails.open = true;
-    },
+      this.view.renderLogs(this.logs.map((item) =>
+        `<div class="bllmc-log-${item.level}">[${item.time}] ${Util.escapeHtml(item.message)}</div>`).join(''));
+      if (safeLevel === 'error') this.view.openLogDetails();
+    }
+
     logText() {
       return this.logs.map((item) => `[${item.time}] ${item.message}`).join('\n');
-    },
+    }
+
+    clearLogs() {
+      this.logs = [];
+      this.view.renderLogs('');
+    }
+
     async copyLogs() {
       const text = this.logText();
       if (!text) {
@@ -1132,126 +1586,280 @@
         this.setStatus('复制日志失败', true);
         this.log(`复制日志失败：${error.message || error}`, 'error');
       }
-    },
-  };
+    }
 
+    async run(operation) {
+      if (this.busy) return;
+      this.busy = true;
+      this.lastOperation = operation;
+      this.view.setBusy(true);
+      try {
+        await operation();
+      } catch (error) {
+        console.error(APP.prefix, error);
+        this.setStatus('操作失败', true);
+        this.log(error.message || String(error), 'error');
+      } finally {
+        this.busy = false;
+        this.view.setBusy(false);
+      }
+    }
+
+    retryLast() {
+      if (this.busy || !this.lastOperation) return;
+      this.run(this.lastOperation);
+    }
+
+    async check() {
+      this.view.loadConfigIntoForm();
+      if (Page.isVideoPage()) {
+        this.setStatus('正在提取视频信息…');
+        const video = await Extractor.currentVideo();
+        this.currentVideo = video;
+        this.view.renderVideo(video);
+        const suffix = Store.isProcessed(video.bvid) ? '（已处理）' : '';
+        this.setStatus(`已识别 ${video.bvid}${suffix}`);
+        const sourceText = video.commentsSource === 'API' ? 'API 热门评论'
+          : video.commentsSource === 'DOM' ? '页面 DOM 评论' : '无评论上下文';
+        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）。`);
+        if (Store.isProcessed(video.bvid)) this.log('该 BV 号已有处理记录，不会重复发布。', 'warn');
+        return;
+      }
+      if (Page.isDiscoveryPage()) {
+        this.setStatus('正在扫描当前页面…');
+        const video = Discovery.newestUnprocessed();
+        if (!video) throw new Error('当前已渲染区域未发现未处理的视频链接；可向下滚动加载更多后重试。');
+        this.currentVideo = null;
+        this.view.renderDiscovery(video);
+        this.setStatus(`发现 ${video.bvid}`);
+        this.log('发现功能仅扫描当前页面已渲染内容；打开视频后才能提取简介和评论。');
+        return;
+      }
+      throw new Error('此页面不支持视频识别或动态发现。');
+    }
+
+    async generate() {
+      this.config = Store.getConfig();
+      if (!this.currentVideo || this.currentVideo.bvid !== Page.getBvid()) await this.check();
+      if (!this.currentVideo) throw new Error('请先打开发现的视频，再生成评论。');
+      if (Store.isProcessed(this.currentVideo.bvid)) throw new Error('该视频已处理，拒绝再次生成发布流程。');
+      if (!this.config.apiKey) {
+        this.openSettings();
+        throw new Error('请先在设置页面填写 API Key。');
+      }
+      if (!this.config.model) throw new Error('请填写模型名称。');
+      this.setStatus('正在调用 LLM…');
+      const comment = await LLM.request(this.config, this.currentVideo);
+      this.view.setComment(comment);
+      this.setStatus('评论已生成，可编辑');
+      this.log(`生成完成，共 ${comment.length} 字。`);
+      if (this.config.autoPublish && !this.config.testMode) {
+        this.log('满足自动发布开关条件，正在执行限频检查。', 'warn');
+        await this.publish(true);
+      }
+    }
+
+    async publish(isAutomatic) {
+      this.config = Store.getConfig();
+      if (!this.currentVideo) throw new Error('请先在当前视频页检查视频信息。');
+      const text = this.view.elements.comment.value;
+      this.setStatus(this.config.testMode ? '正在填入评论框…' : '正在准备发布…');
+      const result = await Publisher.publish(this.currentVideo, text, this.config, isAutomatic);
+      this.setStatus(result.message);
+      this.log(result.message, result.mode === 'published' ? 'success' : 'info');
+      this.view.updateQuotaUI();
+    }
+  }
+
+  // ============== 样式：CSS 变量化 + FAB + 暗色手动切换 + 字数计数 + 拖动 ==============
   GM_addStyle(`
-    /* Panel shell */
-    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:384px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:#ffffff;color:#18191c;border:1px solid rgba(148,153,160,.36);border-radius:8px;box-shadow:0 18px 46px rgba(15,23,42,.18);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    /* ===== 设计 Token（亮色默认） ===== */
+    #${APP.panelId}, #${APP.fabId}, .bllmc-settings-overlay, .bllmc-settings-dialog {
+      --bllmc-bg: #ffffff;
+      --bllmc-fg: #18191c;
+      --bllmc-muted: #61666d;
+      --bllmc-faint: #9499a0;
+      --bllmc-border: #eef0f2;
+      --bllmc-border-strong: #d6d9df;
+      --bllmc-surface: #f7f9fb;
+      --bllmc-surface-2: #fbfcfd;
+      --bllmc-primary: #00aeec;
+      --bllmc-primary-fg: #ffffff;
+      --bllmc-accent: #fb7299;
+      --bllmc-error: #d03050;
+      --bllmc-warn: #a15c00;
+      --bllmc-success: #18864b;
+      --bllmc-warn-bg: #fff6d6;
+      --bllmc-warn-fg: #805b10;
+      --bllmc-warn-border: rgba(221,154,0,.22);
+      --bllmc-shadow: 0 18px 46px rgba(15,23,42,.18);
+      --bllmc-shadow-fab: 0 6px 18px rgba(15,23,42,.22);
+      --bllmc-radius: 8px;
+      --bllmc-radius-sm: 6px;
+      --bllmc-radius-pill: 999px;
+      --bllmc-font: 13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --bllmc-font-mono: ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+
+    /* 暗色：手动或系统（auto 时由 media query 覆盖） */
+    #${APP.panelId}[data-bllmc-theme="dark"], #${APP.fabId}[data-bllmc-theme="dark"],
+    .bllmc-settings-overlay[data-bllmc-theme="dark"], .bllmc-settings-dialog[data-bllmc-theme="dark"] {
+      --bllmc-bg: #202124;
+      --bllmc-fg: #f1f2f3;
+      --bllmc-muted: #b8bcc4;
+      --bllmc-faint: #8a8f98;
+      --bllmc-border: #3a3d42;
+      --bllmc-border-strong: #555b63;
+      --bllmc-surface: #2b2d31;
+      --bllmc-surface-2: #181a1f;
+      --bllmc-primary: #00aeec;
+      --bllmc-primary-fg: #ffffff;
+      --bllmc-accent: #fb7299;
+      --bllmc-error: #ff6b8a;
+      --bllmc-warn: #f0ce7a;
+      --bllmc-success: #4eaf7a;
+      --bllmc-warn-bg: #3a3018;
+      --bllmc-warn-fg: #f0ce7a;
+      --bllmc-warn-border: rgba(240,206,122,.25);
+      --bllmc-shadow: 0 18px 46px rgba(0,0,0,.5);
+      --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
+    }
+    /* auto 主题跟随系统 */
+    @media (prefers-color-scheme: dark) {
+      #${APP.panelId}[data-bllmc-theme="auto"], #${APP.fabId}[data-bllmc-theme="auto"] {
+        --bllmc-bg: #202124; --bllmc-fg: #f1f2f3; --bllmc-muted: #b8bcc4; --bllmc-faint: #8a8f98;
+        --bllmc-border: #3a3d42; --bllmc-border-strong: #555b63; --bllmc-surface: #2b2d31; --bllmc-surface-2: #181a1f;
+        --bllmc-error: #ff6b8a; --bllmc-warn: #f0ce7a; --bllmc-success: #4eaf7a;
+        --bllmc-warn-bg: #3a3018; --bllmc-warn-fg: #f0ce7a; --bllmc-warn-border: rgba(240,206,122,.25);
+        --bllmc-shadow: 0 18px 46px rgba(0,0,0,.5); --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
+      }
+    }
+
+    /* ===== FAB 悬浮按钮 ===== */
+    #${APP.fabId}{position:fixed;width:48px;height:48px;border:0;border-radius:50%;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff;box-shadow:var(--bllmc-shadow-fab);cursor:pointer;font:600 16px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;transition:transform .12s ease,box-shadow .12s ease}
+    #${APP.fabId}:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 10px 24px rgba(15,23,42,.32)}
+    #${APP.fabId}:active{transform:translateY(0) scale(.96)}
+    #${APP.fabId} .bllmc-fab-icon{pointer-events:none}
+
+    /* ===== Panel shell ===== */
+    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:384px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:var(--bllmc-bg);color:var(--bllmc-fg);border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius);box-shadow:var(--bllmc-shadow);font:var(--bllmc-font)}
     #${APP.panelId} *,.bllmc-settings-overlay *{box-sizing:border-box}
     #${APP.panelId}::-webkit-scrollbar,#${APP.panelId} *::-webkit-scrollbar,.bllmc-settings-dialog::-webkit-scrollbar,.bllmc-settings-dialog *::-webkit-scrollbar{width:8px;height:8px}
-    #${APP.panelId}::-webkit-scrollbar-thumb,#${APP.panelId} *::-webkit-scrollbar-thumb,.bllmc-settings-dialog::-webkit-scrollbar-thumb,.bllmc-settings-dialog *::-webkit-scrollbar-thumb{background:rgba(99,110,123,.38);border-radius:999px}
+    #${APP.panelId}::-webkit-scrollbar-thumb,#${APP.panelId} *::-webkit-scrollbar-thumb,.bllmc-settings-dialog::-webkit-scrollbar-thumb,.bllmc-settings-dialog *::-webkit-scrollbar-thumb{background:var(--bllmc-faint);border-radius:var(--bllmc-radius-pill);opacity:.6}
     #${APP.panelId}::-webkit-scrollbar-track,#${APP.panelId} *::-webkit-scrollbar-track,.bllmc-settings-dialog::-webkit-scrollbar-track,.bllmc-settings-dialog *::-webkit-scrollbar-track{background:transparent}
 
-    /* Header */
-    #${APP.panelId} .bllmc-header{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:stretch;justify-content:space-between;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff}
+    /* Header（可拖动） */
+    #${APP.panelId} .bllmc-header{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:stretch;justify-content:space-between;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff;cursor:move;user-select:none}
     #${APP.panelId} .bllmc-header button{border:0;background:transparent;color:#fff;cursor:pointer}
-    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;text-align:left}
+    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;text-align:left;cursor:pointer}
     #${APP.panelId} .bllmc-header strong{display:block;font-size:15px;letter-spacing:0}
     #${APP.panelId} .bllmc-header small{display:block;margin-top:1px;font-size:11px;font-weight:500;opacity:.82}
     #${APP.panelId} .bllmc-collapse{font-size:18px;line-height:1}
-    #${APP.panelId} .bllmc-settings-button{min-width:58px;padding:0 13px;font-size:12px;border-left:1px solid rgba(255,255,255,.28)!important;background:rgba(255,255,255,.1)!important}
+    #${APP.panelId} .bllmc-header-tools{display:flex;align-items:stretch}
+    #${APP.panelId} .bllmc-header-tools button{min-width:42px;padding:0 10px;font-size:12px;border-left:1px solid rgba(255,255,255,.28)!important;background:rgba(255,255,255,.1)!important;display:flex;align-items:center;justify-content:center}
+    #${APP.panelId} .bllmc-header-tools [data-action="theme"]{font-size:15px}
 
     /* Body and sections */
     #${APP.panelId} .bllmc-body{max-height:calc(100vh - 86px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
     #${APP.panelId} .bllmc-body-collapsed{max-height:0;padding-top:0;padding-bottom:0;opacity:0;pointer-events:none}
-    #${APP.panelId} .bllmc-section{margin:10px 0 0;padding-top:10px;border-top:1px solid #eef0f2}
+    #${APP.panelId} .bllmc-section{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--bllmc-border)}
     #${APP.panelId} .bllmc-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
-    #${APP.panelId} h3{margin:0;font-size:12px;font-weight:700;color:#61666d}
+    #${APP.panelId} h3{margin:0;font-size:12px;font-weight:700;color:var(--bllmc-muted)}
 
     /* Inputs */
-    #${APP.panelId} textarea,#${APP.panelId} input[type="text"],#${APP.panelId} input[type="url"],#${APP.panelId} input[type="password"],#${APP.panelId} input[type="number"]{width:100%;padding:9px 10px;border:1px solid #d6d9df;border-radius:6px;background:#fff;color:#18191c;font:inherit;outline:none;transition:border-color .12s ease,box-shadow .12s ease,background .12s ease}
-    #${APP.panelId} textarea:focus,#${APP.panelId} input[type]:focus,.bllmc-settings-content input:focus,.bllmc-settings-content textarea:focus,.bllmc-settings-content select:focus{border-color:#00aeec;box-shadow:0 0 0 3px rgba(0,174,236,.14)}
+    #${APP.panelId} textarea,#${APP.panelId} input[type="text"],#${APP.panelId} input[type="url"],#${APP.panelId} input[type="password"],#${APP.panelId} input[type="number"]{width:100%;padding:9px 10px;border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius-sm);background:var(--bllmc-bg);color:var(--bllmc-fg);font:inherit;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
+    #${APP.panelId} textarea:focus,#${APP.panelId} input[type]:focus,.bllmc-settings-content input:focus,.bllmc-settings-content textarea:focus,.bllmc-settings-content select:focus{border-color:var(--bllmc-primary);box-shadow:0 0 0 3px rgba(0,174,236,.14)}
     #${APP.panelId} textarea{min-height:86px;resize:vertical}
 
     /* Buttons and links */
-    #${APP.panelId} .bllmc-body button,.bllmc-settings-dialog button{position:relative;padding:7px 12px;border:1px solid #d6d9df;border-radius:6px;background:#fff;color:#18191c;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease,opacity .12s ease,border-color .12s ease}
+    #${APP.panelId} .bllmc-body button,.bllmc-settings-dialog button{position:relative;padding:7px 12px;border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius-sm);background:var(--bllmc-bg);color:var(--bllmc-fg);cursor:pointer;transition:transform .12s ease,filter .12s ease,opacity .12s ease,border-color .12s ease}
     #${APP.panelId} .bllmc-body button:hover:not(:disabled),.bllmc-settings-dialog button:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.02)}
     #${APP.panelId} .bllmc-body button:active:not(:disabled),.bllmc-settings-dialog button:active:not(:disabled){transform:translateY(0) scale(.98)}
-    #${APP.panelId} .bllmc-primary,#${APP.panelId} .bllmc-open,.bllmc-settings-dialog .bllmc-primary{background:#00aeec!important;color:#fff!important;border-color:#00aeec!important;box-shadow:0 7px 18px rgba(0,174,236,.24)}
-    #${APP.panelId} .bllmc-secondary{background:#f7f9fb!important;border-color:#d6d9df!important}
-    #${APP.panelId} .bllmc-open{display:inline-block;margin-top:7px;padding:6px 10px;border-radius:6px;text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
+    #${APP.panelId} .bllmc-primary,#${APP.panelId} .bllmc-open,.bllmc-settings-dialog .bllmc-primary{background:var(--bllmc-primary)!important;color:var(--bllmc-primary-fg)!important;border-color:var(--bllmc-primary)!important;box-shadow:0 7px 18px rgba(0,174,236,.24)}
+    #${APP.panelId} .bllmc-secondary{background:var(--bllmc-surface)!important;border-color:var(--bllmc-border-strong)!important}
+    #${APP.panelId} .bllmc-open{display:inline-block;margin-top:7px;padding:6px 10px;border-radius:var(--bllmc-radius-sm);text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
     #${APP.panelId} .bllmc-open:hover{transform:translateY(-1px);box-shadow:0 6px 14px rgba(0,174,236,.26)}
     #${APP.panelId}.bllmc-busy .bllmc-body button:disabled{padding-right:28px;pointer-events:none;opacity:.72}
     #${APP.panelId}.bllmc-busy .bllmc-body button:disabled::after{content:"";position:absolute;right:9px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:bllmc-spin .75s linear infinite}
 
-    /* Controls and status */
+    /* Status + retry */
     #${APP.panelId} .bllmc-topline{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
-    #${APP.panelId} .bllmc-topline [data-role="status"]{min-width:0;padding:7px 9px;border:1px solid #eef0f2;border-radius:6px;background:#fbfcfd;color:#3f444b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${APP.panelId} .bllmc-status-wrap{display:flex;align-items:center;gap:8px;min-width:0}
+    #${APP.panelId} .bllmc-topline [data-role="status"]{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-sm);background:var(--bllmc-surface-2);color:var(--bllmc-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${APP.panelId} .bllmc-retry{padding:5px 9px;font-size:11px;border-color:var(--bllmc-error);color:var(--bllmc-error);background:var(--bllmc-bg)}
+    #${APP.panelId} .bllmc-retry[hidden]{display:none}
     #${APP.panelId} .bllmc-actions{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:8px}
     #${APP.panelId} .bllmc-actions .bllmc-primary{min-width:104px}
     #${APP.panelId}.bllmc-busy{cursor:progress}
-    #${APP.panelId}.bllmc-busy [data-role="status"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:#00aeec;animation:bllmc-pulse 1s ease-in-out infinite;vertical-align:1px}
-    #${APP.panelId} label{display:block;color:#61666d}
-    #${APP.panelId} .bllmc-modebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin:9px 0 0;padding:9px 10px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:7px}
+    #${APP.panelId}.bllmc-busy [data-role="status"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--bllmc-primary);animation:bllmc-pulse 1s ease-in-out infinite;vertical-align:1px}
+    #${APP.panelId} label{display:block;color:var(--bllmc-muted)}
+    #${APP.panelId} .bllmc-modebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin:9px 0 0;padding:9px 10px;background:var(--bllmc-surface);border:1px solid var(--bllmc-border);border-radius:7px}
     #${APP.panelId} .bllmc-mode-copy{min-width:0}
     #${APP.panelId} .bllmc-switches{display:grid;gap:4px;margin:0}
-    #${APP.panelId} .bllmc-switches label{display:inline-flex;align-items:center;gap:5px;color:#3f444b;white-space:nowrap}
-    #${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota{font-size:11px;color:#61666d}
+    #${APP.panelId} .bllmc-switches label{display:inline-flex;align-items:center;gap:5px;color:var(--bllmc-fg);white-space:nowrap}
+    #${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota{font-size:11px;color:var(--bllmc-muted)}
     #${APP.panelId} .bllmc-mode-hint{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #${APP.panelId} .bllmc-quota{margin-top:2px;color:#9499a0}
-    #${APP.panelId} .bllmc-live-mode{color:#c43c58;font-weight:600}
-    #${APP.panelId} .bllmc-warning,.bllmc-settings-dialog .bllmc-warning{padding:9px 10px;background:#fff6d6;color:#805b10;border:1px solid rgba(221,154,0,.22);border-radius:6px}
+    #${APP.panelId} .bllmc-quota{margin-top:2px;color:var(--bllmc-faint)}
+    #${APP.panelId} .bllmc-live-mode{color:var(--bllmc-error);font-weight:600}
+    #${APP.panelId} .bllmc-warning,.bllmc-settings-dialog .bllmc-warning{padding:9px 10px;background:var(--bllmc-warn-bg);color:var(--bllmc-warn-fg);border:1px solid var(--bllmc-warn-border);border-radius:var(--bllmc-radius-sm)}
+
+    /* 字数计数器 */
+    #${APP.panelId} .bllmc-counter{font-size:11px;color:var(--bllmc-faint);font-variant-numeric:tabular-nums}
+    #${APP.panelId} .bllmc-counter-ok{color:var(--bllmc-success)}
+    #${APP.panelId} .bllmc-counter-over{color:var(--bllmc-error);font-weight:600}
 
     /* Video summary */
     #${APP.panelId} [data-role="video"]{max-height:126px;overflow:auto;word-break:break-word}
-    #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:#18191c;font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:var(--bllmc-fg);font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     #${APP.panelId} .bllmc-video-meta{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
-    #${APP.panelId} .bllmc-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border:1px solid #e3e5e7;border-radius:999px;background:#f7f9fb;color:#61666d;font-size:11px}
-    #${APP.panelId} .bllmc-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:#e8f7ff;color:#0077a8;font-size:11px;font-weight:600}
-    #${APP.panelId} .bllmc-video-desc{color:#61666d;font-size:12px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+    #${APP.panelId} .bllmc-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-pill);background:var(--bllmc-surface);color:var(--bllmc-muted);font-size:11px}
+    #${APP.panelId} .bllmc-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:var(--bllmc-radius-pill);background:#e8f7ff;color:#0077a8;font-size:11px;font-weight:600}
 
     /* Logs */
-    #${APP.panelId} .bllmc-details{margin-top:10px;border-top:1px solid #eef0f2}
-    #${APP.panelId} .bllmc-details>summary{padding:9px 2px 7px;cursor:pointer;font-weight:700;color:#3f444b;list-style-position:inside}
+    #${APP.panelId} .bllmc-details{margin-top:10px;border-top:1px solid var(--bllmc-border)}
+    #${APP.panelId} .bllmc-details>summary{padding:9px 2px 7px;cursor:pointer;font-weight:700;color:var(--bllmc-fg);list-style-position:inside}
     #${APP.panelId} .bllmc-log-toolbar{display:flex;justify-content:flex-end;gap:6px;margin:0 0 5px}
     #${APP.panelId} .bllmc-log-toolbar button{padding:3px 7px!important;font-size:11px}
-    #${APP.panelId} .bllmc-logs{height:78px;overflow:auto;padding:8px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
-    #${APP.panelId} .bllmc-log-error,#${APP.panelId} .bllmc-error{color:#d03050}
-    #${APP.panelId} .bllmc-log-warn{color:#a15c00}
-    #${APP.panelId} .bllmc-log-success{color:#18864b}
+    #${APP.panelId} .bllmc-logs{height:78px;overflow:auto;padding:8px;background:var(--bllmc-surface);border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-sm);font-family:var(--bllmc-font-mono);font-size:11px;line-height:1.55}
+    #${APP.panelId} .bllmc-log-error,#${APP.panelId} .bllmc-error{color:var(--bllmc-error)}
+    #${APP.panelId} .bllmc-log-warn{color:var(--bllmc-warn)}
+    #${APP.panelId} .bllmc-log-success{color:var(--bllmc-success)}
 
     /* Settings dialog */
     .bllmc-settings-overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.52);backdrop-filter:blur(3px);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    .bllmc-settings-dialog{width:min(620px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#fff;color:#18191c;border:1px solid rgba(148,153,160,.34);border-radius:8px;box-shadow:0 22px 60px rgba(15,23,42,.35)}
+    .bllmc-settings-dialog{width:min(620px,100%);max-height:calc(100vh - 40px);overflow:auto;background:var(--bllmc-bg);color:var(--bllmc-fg);border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius);box-shadow:0 22px 60px rgba(15,23,42,.35)}
     .bllmc-settings-header,.bllmc-settings-footer{display:flex;align-items:center;justify-content:space-between;padding:14px 18px}
-    .bllmc-settings-header{border-bottom:1px solid #eef0f2}
+    .bllmc-settings-header{border-bottom:1px solid var(--bllmc-border)}
     .bllmc-settings-header strong{display:block;font-size:16px}
-    .bllmc-settings-header small{display:block;margin-top:2px;color:#9499a0;font-size:12px}
-    .bllmc-settings-footer{justify-content:flex-end;gap:8px;border-top:1px solid #eef0f2;background:#fbfcfd}
-    .bllmc-settings-header button{width:36px;height:36px;padding:0;border:0;background:#f1f3f5;font-size:24px;line-height:1}
+    .bllmc-settings-header small{display:block;margin-top:2px;color:var(--bllmc-faint);font-size:12px}
+    .bllmc-settings-footer{justify-content:flex-end;gap:8px;border-top:1px solid var(--bllmc-border);background:var(--bllmc-surface-2)}
+    .bllmc-settings-header button{width:36px;height:36px;padding:0;border:0;background:var(--bllmc-surface);font-size:24px;line-height:1}
     .bllmc-settings-content{display:grid;gap:14px;padding:16px 18px 18px}
     .bllmc-settings-group{display:grid;gap:10px}
-    .bllmc-settings-group h3{margin:0;color:#3f444b;font-size:13px}
-    .bllmc-settings-content label{display:block;color:#61666d}
-    .bllmc-settings-content input,.bllmc-settings-content textarea,.bllmc-settings-content select{width:100%;margin-top:5px;padding:9px 10px;border:1px solid #d6d9df;border-radius:6px;background:#fff;color:#18191c;font:inherit;outline:none;transition:border-color .12s ease,box-shadow .12s ease,background .12s ease}
+    .bllmc-settings-group h3{margin:0;color:var(--bllmc-fg);font-size:13px}
+    .bllmc-settings-content label{display:block;color:var(--bllmc-muted)}
+    .bllmc-settings-content input,.bllmc-settings-content textarea,.bllmc-settings-content select{width:100%;margin-top:5px;padding:9px 10px;border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius-sm);background:var(--bllmc-bg);color:var(--bllmc-fg);font:inherit;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
     .bllmc-settings-content textarea{resize:vertical}
     .bllmc-settings-row{display:grid;grid-template-columns:2fr 1fr;gap:12px}
-    .bllmc-settings-error{min-height:20px;color:#d03050}
+    .bllmc-settings-error{min-height:20px;color:var(--bllmc-error)}
+    .bllmc-settings-test{display:flex;align-items:center;gap:12px}
+    .bllmc-settings-test button{padding:7px 14px}
+    .bllmc-settings-test-result{font-size:12px;color:var(--bllmc-muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bllmc-settings-test-ok{color:var(--bllmc-success)!important}
+    .bllmc-settings-test-fail{color:var(--bllmc-error)!important}
+    .bllmc-settings-test-pending{color:var(--bllmc-primary)!important}
 
     /* Animations */
     @keyframes bllmc-spin{to{transform:rotate(360deg)}}
     @keyframes bllmc-pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
 
-    /* Dark mode */
-    @media (prefers-color-scheme:dark){
-      #${APP.panelId},.bllmc-settings-dialog{background:#202124;color:#f1f2f3;border-color:#4b4f56}
-      #${APP.panelId} .bllmc-section,#${APP.panelId} .bllmc-details,.bllmc-settings-header,.bllmc-settings-footer{border-color:#3a3d42}
-      #${APP.panelId} textarea,#${APP.panelId} input[type],.bllmc-settings-content input,.bllmc-settings-content textarea,.bllmc-settings-content select{background:#2b2d31;color:#f1f2f3;border-color:#555b63}
-      #${APP.panelId} .bllmc-body button,.bllmc-settings-dialog button{background:#2b2d31;color:#f1f2f3;border-color:#555b63}
-      #${APP.panelId} .bllmc-secondary{background:#2b2d31!important;border-color:#555b63!important}
-      #${APP.panelId} .bllmc-logs,#${APP.panelId} .bllmc-modebar,#${APP.panelId} .bllmc-topline [data-role="status"],.bllmc-settings-footer,.bllmc-settings-header button{background:#181a1f;border-color:#3a3d42}
-      #${APP.panelId} label,#${APP.panelId} .bllmc-topline [data-role="status"],#${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota,#${APP.panelId} .bllmc-video-desc,.bllmc-settings-content label,.bllmc-settings-header small{color:#b8bcc4}
-      #${APP.panelId} h3,#${APP.panelId} .bllmc-details>summary,.bllmc-settings-group h3{color:#d9dde4}
-      #${APP.panelId} .bllmc-video-title{color:#f1f2f3}
-      #${APP.panelId} .bllmc-tag{background:#2b2d31;border-color:#555b63;color:#d9dde4}
-      #${APP.panelId} .bllmc-badge{background:#12384a;color:#7bd6ff}
-      #${APP.panelId} .bllmc-warning,.bllmc-settings-dialog .bllmc-warning{background:#3a3018;color:#f0ce7a}
-    }
+    /* Dark badge override (auto + manual) */
+    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge{background:#12384a;color:#7bd6ff}
 
     /* Narrow screens */
     @media(max-width:520px){
       #${APP.panelId}{right:8px;bottom:8px;width:calc(100vw - 16px)}
+      #${APP.fabId}{right:14px;bottom:14px}
       .bllmc-settings-overlay{padding:10px}
       .bllmc-settings-row{grid-template-columns:1fr}
       #${APP.panelId} .bllmc-topline{grid-template-columns:1fr}
@@ -1261,30 +1869,11 @@
     }
   `);
 
-  let lastUrl = location.href;
-  let routeTimer = 0;
-  const routeObserver = new MutationObserver(() => {
-    if (location.href === lastUrl) return;
-    lastUrl = location.href;
-    window.clearTimeout(routeTimer);
-    routeTimer = window.setTimeout(() => {
-      UI.currentVideo = null;
-      UI.elements.comment.value = '';
-      UI.elements.video.textContent = '页面已切换，请重新检查';
-      UI.setStatus('检测到 SPA 页面切换');
-      UI.log('URL 已变化，已清除当前视频上下文。');
-    }, APP.routeDebounceMs);
+  const controller = new Controller();
+  controller.init();
+  GM_registerMenuCommand('打开 B 站嘴替小助手设置', () => controller.openSettings());
+  GM_registerMenuCommand('切换面板/FAB', () => {
+    if (controller.panelState.fabMode) controller.view.expandFromFab();
+    else controller.view.collapseToFab();
   });
-
-  function cleanup() {
-    routeObserver.disconnect();
-    window.clearTimeout(routeTimer);
-    document.getElementById(APP.panelId)?.remove();
-    UI.settingsCleanup?.();
-  }
-
-  UI.mount();
-  GM_registerMenuCommand('打开 B 站嘴替小助手设置', () => UI.openSettings());
-  routeObserver.observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('pagehide', cleanup, { once: true });
 })();
