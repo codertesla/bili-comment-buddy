@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.6.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.6.2-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。
 
@@ -112,6 +112,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.6.2 (2026-06-18)：修复从 FAB 展开面板后最小化/主题按钮失效——`expandFromFab` 重复调用 `bindPanel` 导致事件双重绑定相互抵消，现已去除冗余绑定。
 - v0.6.1 (2026-06-18)：修复最小化按钮失效（拖动监听不再拦截按钮点击）；主题改为 light/dark 两档切换，首次运行按系统偏好初始化，点击即时可见效果。
 - v0.6.0 (2026-06-18)：修复动态页/空间页弹窗时机——非视频页改为悬浮按钮（FAB），点击才展开完整面板；新增面板拖动与位置记忆、主题手动切换（自动/亮/暗）、字数计数器、操作失败重试按钮、设置弹窗“测试连接”；CSS 全面变量化；Shadow DOM 根扫描加缓存并改用 MutationObserver 等待元素；UI 拆分为 PanelView / SettingsView / Controller。
 - v0.5.3 (2026-06-18)：调整脚本描述和 README，突出“调用 AI 为 B 站视频生成一条可编辑评论”的核心用途。

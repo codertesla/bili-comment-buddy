@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.1
+// @version      0.6.2
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.1',
+    version: '0.6.2',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1035,11 +1035,11 @@
     }
 
     expandFromFab() {
+      // buildPanel() 内部已调用 bindPanel()，切勿重复绑定，否则按钮事件会触发两次相互抵消。
       this.buildPanel();
       this.applyCollapsed(false);
       this.applyTheme(this.state.theme);
       this.applyPosition(this.state.right, this.state.bottom);
-      this.bindPanel();
       this.controller.refreshFromState();
       if (this.fab) this.fab.hidden = true;
       const next = { ...this.state, fabMode: false, collapsed: false };
