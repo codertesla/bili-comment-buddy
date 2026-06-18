@@ -809,19 +809,21 @@
         </div>
         <div class="bllmc-body">
           <div class="bllmc-topline">
-            <button data-action="check" class="bllmc-secondary">检查最新视频</button>
             <span data-role="status">就绪</span>
+            <button data-action="check" class="bllmc-secondary">检查视频</button>
           </div>
           <div class="bllmc-modebar">
-            <div class="bllmc-switches">
-              <label><input data-field="testMode" type="checkbox"> 测试模式</label>
-              <label><input data-field="autoPublish" type="checkbox"> 生成后自动发布</label>
+            <div class="bllmc-mode-copy">
+              <div data-role="modeHint" class="bllmc-mode-hint"></div>
+              <div data-role="quota" class="bllmc-quota"></div>
             </div>
-            <div data-role="modeHint" class="bllmc-mode-hint"></div>
-            <div data-role="quota" class="bllmc-quota"></div>
+            <div class="bllmc-switches">
+              <label><input data-field="testMode" type="checkbox"> 测试</label>
+              <label><input data-field="autoPublish" type="checkbox"> 自动发布</label>
+            </div>
           </div>
-          <section class="bllmc-section"><h3>视频</h3><div data-role="video" class="bllmc-muted">尚未检查</div></section>
-          <section class="bllmc-section"><h3>生成评论</h3><textarea data-field="comment" rows="4" placeholder="生成后可在此编辑"></textarea>
+          <section class="bllmc-section"><div class="bllmc-section-head"><h3>视频信息</h3></div><div data-role="video" class="bllmc-muted">尚未检查</div></section>
+          <section class="bllmc-section bllmc-comment-section"><div class="bllmc-section-head"><h3>评论草稿</h3></div><textarea data-field="comment" rows="4" placeholder="生成后可在此编辑"></textarea>
             <div class="bllmc-actions"><button data-action="generate" class="bllmc-secondary">生成评论</button><button data-action="publish" data-role="publishButton" class="bllmc-primary">填入评论框</button></div>
           </section>
           <details data-role="logDetails" class="bllmc-details">
@@ -991,12 +993,12 @@
       this.elements.publishButton.textContent = testMode ? '填入评论框' : '立即发布';
       if (testMode) {
         this.elements.modeHint.textContent = autoPublish
-          ? '测试模式开启：只填入评论框，自动发布暂不生效。'
-          : '测试模式开启：只填入评论框，不会发送。';
+          ? '测试：只填入，自动发布暂停。'
+          : '测试：只填入，不发送。';
       } else {
         this.elements.modeHint.textContent = autoPublish
-          ? '实发模式：生成完成后将直接发布，不再确认。'
-          : '实发模式：点击“立即发布”后直接发送，不再确认。';
+          ? '实发：生成后直接发布。'
+          : '实发：点击后直接发送。';
       }
       this.elements.modeHint.classList.toggle('bllmc-live-mode', !testMode);
       this.updateQuotaUI();
@@ -1004,7 +1006,7 @@
     updateQuotaUI() {
       if (!this.elements.quota) return;
       const stats = Store.getPublishStats();
-      this.elements.quota.textContent = `今日自动发布：${stats.count}/${this.config.dailyAutoPublishLimit} · 间隔 ≥ 10 分钟`;
+      this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit} · ≥ 10 分钟`;
     },
     async run(operation) {
       if (this.busy) return;
@@ -1083,9 +1085,8 @@
     },
     renderVideo(video) {
       this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
-        <div class="bllmc-video-meta"><span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span><span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span></div>
-        <div class="bllmc-video-desc">简介：${Util.escapeHtml(video.description || '未提供')}</div>
-        <div class="bllmc-video-meta"><span class="bllmc-badge">${video.comments.length} 条可用评论</span></div>`;
+        <div class="bllmc-video-meta"><span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span><span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span><span class="bllmc-badge">${video.comments.length} 条评论上下文</span></div>
+        <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
     },
     renderDiscovery(video) {
       this.elements.video.innerHTML = `<strong>${Util.escapeHtml(video.title)}</strong>
@@ -1136,7 +1137,7 @@
 
   GM_addStyle(`
     /* Panel shell */
-    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:392px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:#ffffff;color:#18191c;border:1px solid rgba(148,153,160,.36);border-radius:8px;box-shadow:0 18px 46px rgba(15,23,42,.18);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:384px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:#ffffff;color:#18191c;border:1px solid rgba(148,153,160,.36);border-radius:8px;box-shadow:0 18px 46px rgba(15,23,42,.18);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     #${APP.panelId} *,.bllmc-settings-overlay *{box-sizing:border-box}
     #${APP.panelId}::-webkit-scrollbar,#${APP.panelId} *::-webkit-scrollbar,.bllmc-settings-dialog::-webkit-scrollbar,.bllmc-settings-dialog *::-webkit-scrollbar{width:8px;height:8px}
     #${APP.panelId}::-webkit-scrollbar-thumb,#${APP.panelId} *::-webkit-scrollbar-thumb,.bllmc-settings-dialog::-webkit-scrollbar-thumb,.bllmc-settings-dialog *::-webkit-scrollbar-thumb{background:rgba(99,110,123,.38);border-radius:999px}
@@ -1145,22 +1146,23 @@
     /* Header */
     #${APP.panelId} .bllmc-header{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:stretch;justify-content:space-between;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff}
     #${APP.panelId} .bllmc-header button{border:0;background:transparent;color:#fff;cursor:pointer}
-    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;text-align:left}
+    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;text-align:left}
     #${APP.panelId} .bllmc-header strong{display:block;font-size:15px;letter-spacing:0}
     #${APP.panelId} .bllmc-header small{display:block;margin-top:1px;font-size:11px;font-weight:500;opacity:.82}
     #${APP.panelId} .bllmc-collapse{font-size:18px;line-height:1}
     #${APP.panelId} .bllmc-settings-button{min-width:58px;padding:0 13px;font-size:12px;border-left:1px solid rgba(255,255,255,.28)!important;background:rgba(255,255,255,.1)!important}
 
     /* Body and sections */
-    #${APP.panelId} .bllmc-body{max-height:calc(100vh - 96px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
+    #${APP.panelId} .bllmc-body{max-height:calc(100vh - 86px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
     #${APP.panelId} .bllmc-body-collapsed{max-height:0;padding-top:0;padding-bottom:0;opacity:0;pointer-events:none}
-    #${APP.panelId} .bllmc-section{margin:11px 0 0;padding-top:11px;border-top:1px solid #eef0f2}
-    #${APP.panelId} h3{margin:0 0 8px;font-size:12px;font-weight:700;color:#61666d}
+    #${APP.panelId} .bllmc-section{margin:10px 0 0;padding-top:10px;border-top:1px solid #eef0f2}
+    #${APP.panelId} .bllmc-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+    #${APP.panelId} h3{margin:0;font-size:12px;font-weight:700;color:#61666d}
 
     /* Inputs */
     #${APP.panelId} textarea,#${APP.panelId} input[type="text"],#${APP.panelId} input[type="url"],#${APP.panelId} input[type="password"],#${APP.panelId} input[type="number"]{width:100%;padding:9px 10px;border:1px solid #d6d9df;border-radius:6px;background:#fff;color:#18191c;font:inherit;outline:none;transition:border-color .12s ease,box-shadow .12s ease,background .12s ease}
     #${APP.panelId} textarea:focus,#${APP.panelId} input[type]:focus,.bllmc-settings-content input:focus,.bllmc-settings-content textarea:focus,.bllmc-settings-content select:focus{border-color:#00aeec;box-shadow:0 0 0 3px rgba(0,174,236,.14)}
-    #${APP.panelId} textarea{min-height:94px;resize:vertical}
+    #${APP.panelId} textarea{min-height:86px;resize:vertical}
 
     /* Buttons and links */
     #${APP.panelId} .bllmc-body button,.bllmc-settings-dialog button{position:relative;padding:7px 12px;border:1px solid #d6d9df;border-radius:6px;background:#fff;color:#18191c;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease,opacity .12s ease,border-color .12s ease}
@@ -1174,34 +1176,37 @@
     #${APP.panelId}.bllmc-busy .bllmc-body button:disabled::after{content:"";position:absolute;right:9px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:bllmc-spin .75s linear infinite}
 
     /* Controls and status */
-    #${APP.panelId} .bllmc-topline{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px}
-    #${APP.panelId} .bllmc-topline [data-role="status"]{min-width:0;text-align:right;color:#61666d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #${APP.panelId} .bllmc-actions{display:flex;align-items:center;gap:8px;justify-content:space-between}
+    #${APP.panelId} .bllmc-topline{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
+    #${APP.panelId} .bllmc-topline [data-role="status"]{min-width:0;padding:7px 9px;border:1px solid #eef0f2;border-radius:6px;background:#fbfcfd;color:#3f444b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${APP.panelId} .bllmc-actions{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:8px}
+    #${APP.panelId} .bllmc-actions .bllmc-primary{min-width:104px}
     #${APP.panelId}.bllmc-busy{cursor:progress}
     #${APP.panelId}.bllmc-busy [data-role="status"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:#00aeec;animation:bllmc-pulse 1s ease-in-out infinite;vertical-align:1px}
     #${APP.panelId} label{display:block;color:#61666d}
-    #${APP.panelId} .bllmc-modebar{margin:11px 0 0;padding:10px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:7px}
-    #${APP.panelId} .bllmc-switches{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 6px}
-    #${APP.panelId} .bllmc-switches label{display:inline-flex;align-items:center;gap:5px;color:#3f444b}
+    #${APP.panelId} .bllmc-modebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin:9px 0 0;padding:9px 10px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:7px}
+    #${APP.panelId} .bllmc-mode-copy{min-width:0}
+    #${APP.panelId} .bllmc-switches{display:grid;gap:4px;margin:0}
+    #${APP.panelId} .bllmc-switches label{display:inline-flex;align-items:center;gap:5px;color:#3f444b;white-space:nowrap}
     #${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota{font-size:11px;color:#61666d}
-    #${APP.panelId} .bllmc-quota{margin-top:3px;color:#9499a0}
+    #${APP.panelId} .bllmc-mode-hint{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${APP.panelId} .bllmc-quota{margin-top:2px;color:#9499a0}
     #${APP.panelId} .bllmc-live-mode{color:#c43c58;font-weight:600}
     #${APP.panelId} .bllmc-warning,.bllmc-settings-dialog .bllmc-warning{padding:9px 10px;background:#fff6d6;color:#805b10;border:1px solid rgba(221,154,0,.22);border-radius:6px}
 
     /* Video summary */
-    #${APP.panelId} [data-role="video"]{max-height:148px;overflow:auto;word-break:break-word}
-    #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:#18191c;font-size:14px;font-weight:700;line-height:1.35}
-    #${APP.panelId} .bllmc-video-meta{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0}
+    #${APP.panelId} [data-role="video"]{max-height:126px;overflow:auto;word-break:break-word}
+    #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:#18191c;font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    #${APP.panelId} .bllmc-video-meta{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
     #${APP.panelId} .bllmc-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border:1px solid #e3e5e7;border-radius:999px;background:#f7f9fb;color:#61666d;font-size:11px}
     #${APP.panelId} .bllmc-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:#e8f7ff;color:#0077a8;font-size:11px;font-weight:600}
-    #${APP.panelId} .bllmc-video-desc{color:#61666d;font-size:12px;line-height:1.45}
+    #${APP.panelId} .bllmc-video-desc{color:#61666d;font-size:12px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 
     /* Logs */
-    #${APP.panelId} .bllmc-details{margin-top:11px;border-top:1px solid #eef0f2}
-    #${APP.panelId} .bllmc-details>summary{padding:10px 2px 8px;cursor:pointer;font-weight:700;color:#3f444b;list-style-position:inside}
+    #${APP.panelId} .bllmc-details{margin-top:10px;border-top:1px solid #eef0f2}
+    #${APP.panelId} .bllmc-details>summary{padding:9px 2px 7px;cursor:pointer;font-weight:700;color:#3f444b;list-style-position:inside}
     #${APP.panelId} .bllmc-log-toolbar{display:flex;justify-content:flex-end;gap:6px;margin:0 0 5px}
     #${APP.panelId} .bllmc-log-toolbar button{padding:3px 7px!important;font-size:11px}
-    #${APP.panelId} .bllmc-logs{height:92px;overflow:auto;padding:8px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
+    #${APP.panelId} .bllmc-logs{height:78px;overflow:auto;padding:8px;background:#f7f9fb;border:1px solid #eef0f2;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.55}
     #${APP.panelId} .bllmc-log-error,#${APP.panelId} .bllmc-error{color:#d03050}
     #${APP.panelId} .bllmc-log-warn{color:#a15c00}
     #${APP.panelId} .bllmc-log-success{color:#18864b}
@@ -1235,7 +1240,7 @@
       #${APP.panelId} textarea,#${APP.panelId} input[type],.bllmc-settings-content input,.bllmc-settings-content textarea,.bllmc-settings-content select{background:#2b2d31;color:#f1f2f3;border-color:#555b63}
       #${APP.panelId} .bllmc-body button,.bllmc-settings-dialog button{background:#2b2d31;color:#f1f2f3;border-color:#555b63}
       #${APP.panelId} .bllmc-secondary{background:#2b2d31!important;border-color:#555b63!important}
-      #${APP.panelId} .bllmc-logs,#${APP.panelId} .bllmc-modebar,.bllmc-settings-footer,.bllmc-settings-header button{background:#181a1f;border-color:#3a3d42}
+      #${APP.panelId} .bllmc-logs,#${APP.panelId} .bllmc-modebar,#${APP.panelId} .bllmc-topline [data-role="status"],.bllmc-settings-footer,.bllmc-settings-header button{background:#181a1f;border-color:#3a3d42}
       #${APP.panelId} label,#${APP.panelId} .bllmc-topline [data-role="status"],#${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota,#${APP.panelId} .bllmc-video-desc,.bllmc-settings-content label,.bllmc-settings-header small{color:#b8bcc4}
       #${APP.panelId} h3,#${APP.panelId} .bllmc-details>summary,.bllmc-settings-group h3{color:#d9dde4}
       #${APP.panelId} .bllmc-video-title{color:#f1f2f3}
@@ -1251,6 +1256,8 @@
       .bllmc-settings-row{grid-template-columns:1fr}
       #${APP.panelId} .bllmc-topline{grid-template-columns:1fr}
       #${APP.panelId} .bllmc-topline [data-role="status"]{text-align:left;white-space:normal}
+      #${APP.panelId} .bllmc-modebar{grid-template-columns:1fr}
+      #${APP.panelId} .bllmc-switches{grid-template-columns:1fr 1fr}
     }
   `);
 
