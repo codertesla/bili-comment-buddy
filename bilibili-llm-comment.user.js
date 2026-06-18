@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.5
+// @version      0.6.6
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.5',
+    version: '0.6.6',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1792,7 +1792,7 @@
     #${APP.fabId} .bllmc-fab-icon{pointer-events:none}
 
     /* ===== Panel shell ===== */
-    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:384px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:var(--bllmc-bg);color:var(--bllmc-fg);border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius);box-shadow:var(--bllmc-shadow);font:var(--bllmc-font)}
+    #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:320px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:var(--bllmc-bg);color:var(--bllmc-fg);border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius);box-shadow:var(--bllmc-shadow);font:var(--bllmc-font)}
     #${APP.panelId} *,.bllmc-settings-overlay *{box-sizing:border-box}
     #${APP.panelId}::-webkit-scrollbar,#${APP.panelId} *::-webkit-scrollbar,.bllmc-settings-dialog::-webkit-scrollbar,.bllmc-settings-dialog *::-webkit-scrollbar{width:8px;height:8px}
     #${APP.panelId}::-webkit-scrollbar-thumb,#${APP.panelId} *::-webkit-scrollbar-thumb,.bllmc-settings-dialog::-webkit-scrollbar-thumb,.bllmc-settings-dialog *::-webkit-scrollbar-thumb{background:var(--bllmc-faint);border-radius:var(--bllmc-radius-pill);opacity:.6}
@@ -1842,7 +1842,7 @@
     #${APP.panelId} .bllmc-retry{padding:5px 9px;font-size:11px;border-color:var(--bllmc-error);color:var(--bllmc-error);background:var(--bllmc-bg)}
     #${APP.panelId} .bllmc-retry[hidden]{display:none}
     #${APP.panelId} .bllmc-actions{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:8px}
-    #${APP.panelId} .bllmc-actions .bllmc-primary{min-width:104px}
+    #${APP.panelId} .bllmc-actions .bllmc-primary{min-width:92px}
     #${APP.panelId}.bllmc-busy{cursor:progress}
     #${APP.panelId}.bllmc-busy [data-role="status"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--bllmc-primary);animation:bllmc-pulse 1s ease-in-out infinite;vertical-align:1px}
     #${APP.panelId} label{display:block;color:var(--bllmc-muted)}
@@ -1910,7 +1910,7 @@
     #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge{background:#12384a;color:#7bd6ff}
 
     /* Narrow screens */
-    @media(max-width:520px){
+    @media(max-width:420px){
       #${APP.panelId}{right:8px;bottom:8px;width:calc(100vw - 16px)}
       #${APP.fabId}{right:14px;bottom:14px}
       .bllmc-settings-overlay{padding:10px}

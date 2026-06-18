@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.6.5-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.6.6-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。
 
@@ -112,6 +112,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.6.6 (2026-06-18)：收窄面板宽度 384px→320px，主操作按钮 min-width 104px→92px，窄屏全宽断点 520px→420px，整体更紧凑。
 - v0.6.5 (2026-06-18)：UI 低调化。Header 由粉蓝渐变大色块改为跟随面板背景的单色栏，标题与副标题改为同行小字，padding 收紧，按钮用 muted 色而非反白；FAB 由粉蓝渐变改为单色描边圆点，仅 hover 时轻强调；面板 body 最大高度同步调整。
 - v0.6.4 (2026-06-18)：性能与健壮性增强。Shadow DOM root 缓存新增全局 MutationObserver 主动失效，深层 shadow host 变化也能被 `findAllDeep` 同步感知；`waitForCommentEntry` 从 250ms 轮询改为 MutationObserver；`findVisibleSendButton` 兜底扫描限定到评论容器范围，不再全文档扫描；`markProcessed` 仅在超 500 条时才全量排序裁剪；`hasRiskPrompt` 加 800ms 缓存并短路 selector 检测，减少发布流程中的 reflow。
 - v0.6.3 (2026-06-18)：修复设置弹窗主题不跟随面板（暗色下弹窗强制亮色）；合并 FAB 重复 click 绑定；修复拖动后误触发最小化（改为一次性 `_suppressNextClick`，并加窗口失焦兜底防止拖动状态残留）；清理路由切换重复 pageType 计算、死代码 `fillOnly`、无效 `_routeTimer` 与过时 CSS 注释。
