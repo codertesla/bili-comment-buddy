@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.2
+// @version      0.6.3
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.2',
+    version: '0.6.3',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -873,18 +873,6 @@
       }
       return null;
     },
-    async fillOnly(video, text, config) {
-      const comment = this.validate(video, text, config, false);
-      const prevScroll = this.captureScroll();
-      try {
-        const editor = await this.findEditor();
-        this.fillEditor(editor, comment);
-        this.restoreScroll(prevScroll);
-        return editor;
-      } finally {
-        this.restoreScroll(prevScroll);
-      }
-    },
     async publish(video, text, config, isAutomatic = false) {
       const comment = this.validate(video, text, config, isAutomatic);
       const prevScroll = this.captureScroll();
@@ -942,7 +930,6 @@
       }
       this.applyTheme(this.state.theme);
       this.applyPosition(this.state.right, this.state.bottom);
-      this.bindGlobal();
     }
 
     unmount() {
@@ -954,7 +941,8 @@
     }
 
     buildFab() {
-      if (document.getElementById(APP.fabId)) return;
+      // 防御性清理：若 DOM 残留旧 FAB（理论上 unmount 已 remove），先移除避免重复 ID 与重复绑定。
+      document.getElementById(APP.fabId)?.remove();
       const fab = document.createElement('button');
       fab.id = APP.fabId;
       fab.type = 'button';
@@ -963,6 +951,7 @@
       fab.innerHTML = '<span class="bllmc-fab-icon">嘴</span>';
       document.body.appendChild(fab);
       this.fab = fab;
+      // click 绑定统一在此处，避免与 bindGlobal 重复绑定导致 expandFromFab 跑两次。
       fab.addEventListener('click', () => this.expandFromFab());
     }
 
@@ -1081,18 +1070,16 @@
       }
     }
 
-    bindGlobal() {
-      if (this.fab) {
-        this.fab.addEventListener('click', () => this.expandFromFab());
-      }
-    }
-
     bindPanel() {
       const panel = this.panel;
       if (!panel) return;
 
       panel.querySelector('[data-action="collapse"]').addEventListener('click', (event) => {
-        if (this._dragMoved) return;
+        // 拖动结束后的那次 click 需要抑制，避免拖完面板误触最小化。
+        if (this._suppressNextClick) {
+          this._suppressNextClick = false;
+          return;
+        }
         const body = panel.querySelector('.bllmc-body');
         const collapsed = body.classList.toggle('bllmc-body-collapsed');
         event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
@@ -1157,12 +1144,17 @@
         startBottom: window.innerHeight - panelRect.bottom,
       };
       this._dragMoved = false;
+      // 清理上一次可能残留的抑制标记，避免无拖动时 collapse 被误吞。
+      this._suppressNextClick = false;
       const onMove = (e) => this._onDragMove(e);
       const onEnd = () => this._onDragEnd(onMove, onEnd);
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onEnd);
       window.addEventListener('touchmove', onMove, { passive: false });
       window.addEventListener('touchend', onEnd);
+      // 窗口失焦（如切到其他应用松开鼠标）作为兜底结束拖动，防止 _dragMoved 残留。
+      const onBlur = () => { this._onDragEnd(onMove, onEnd); window.removeEventListener('blur', onBlur); };
+      window.addEventListener('blur', onBlur);
     }
 
     _onDragMove(event) {
@@ -1192,6 +1184,8 @@
         const right = Math.round(window.innerWidth - rect.right);
         const bottom = Math.round(window.innerHeight - rect.bottom);
         this.controller.panelState = Store.setPanelState({ ...this.state, right, bottom });
+        // 拖动确实发生过，抑制紧随其后的那次 click（避免误最小化）。
+        this._suppressNextClick = true;
       }
       this._dragState = null;
       this._dragMoved = false;
@@ -1352,6 +1346,9 @@
         </div>`;
       document.body.appendChild(overlay);
       this.overlay = overlay;
+      // 弹窗主题跟随面板当前主题，保证暗色下面板与弹窗一致。
+      const theme = this.controller.panelState.theme === 'dark' ? 'dark' : 'light';
+      overlay.setAttribute('data-bllmc-theme', theme);
 
       for (const key of ['baseUrl', 'model', 'apiKey', 'temperature', 'stylePreset', 'dailyAutoPublishLimit', 'style']) {
         overlay.querySelector(`[data-setting="${key}"]`).value = this.config[key];
@@ -1482,16 +1479,14 @@
 
     bindRouteObserver() {
       let lastUrl = location.href;
-      let routeTimer = 0;
       const observer = new MutationObserver(() => {
         if (location.href === lastUrl) return;
         lastUrl = location.href;
-        window.clearTimeout(routeTimer);
-        routeTimer = window.setTimeout(() => {
+        window.clearTimeout(this._routeTimer);
+        this._routeTimer = window.setTimeout(() => {
           Util.invalidateShadowCache();
           // 页面类型可能变化（如动态页点进视频页），重新分级挂载。
           const nextType = Page.pageType();
-          const cur = Page.pageType();
           this.currentVideo = null;
           this.view.clearComment();
           this.view.setVideoPlaceholder('页面已切换，请重新检查');
@@ -1510,13 +1505,14 @@
       });
       this._mountedType = Page.pageType();
       this._routeObserver = observer;
+      this._routeTimer = 0;
       observer.observe(document.documentElement, { childList: true, subtree: true });
-      this._routeTimer = routeTimer;
       window.addEventListener('pagehide', () => this.cleanup(), { once: true });
     }
 
     cleanup() {
       this._routeObserver?.disconnect();
+      window.clearTimeout(this._routeTimer);
       this.view.unmount();
       this.settings.close();
     }
@@ -1706,7 +1702,7 @@
       --bllmc-font-mono: ui-monospace,SFMono-Regular,Menlo,monospace;
     }
 
-    /* 暗色：手动或系统（auto 时由 media query 覆盖） */
+    /* 暗色主题：手动切换为 dark 时覆盖设计 Token */
     #${APP.panelId}[data-bllmc-theme="dark"], #${APP.fabId}[data-bllmc-theme="dark"],
     .bllmc-settings-overlay[data-bllmc-theme="dark"], .bllmc-settings-dialog[data-bllmc-theme="dark"] {
       --bllmc-bg: #202124;
