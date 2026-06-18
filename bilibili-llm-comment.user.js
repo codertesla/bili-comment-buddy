@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.4
+// @version      0.6.5
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.4',
+    version: '0.6.5',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1021,7 +1021,7 @@
       panel.innerHTML = `
         <div class="bllmc-header" data-role="dragHandle">
           <button data-action="collapse" type="button" aria-expanded="true">
-            <span><strong>B 站嘴替小助手</strong><small>智能生成 · 审慎发布</small></span><span class="bllmc-collapse">−</span>
+            <span class="bllmc-header-title"><strong>B 站嘴替小助手</strong><small>智能生成 · 审慎发布</small></span><span class="bllmc-collapse">−</span>
           </button>
           <div class="bllmc-header-tools">
             <button data-action="theme" type="button" title="切换主题" aria-label="切换主题">◐</button>
@@ -1785,10 +1785,10 @@
       --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
     }
 
-    /* ===== FAB 悬浮按钮 ===== */
-    #${APP.fabId}{position:fixed;width:48px;height:48px;border:0;border-radius:50%;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff;box-shadow:var(--bllmc-shadow-fab);cursor:pointer;font:600 16px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;transition:transform .12s ease,box-shadow .12s ease}
-    #${APP.fabId}:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 10px 24px rgba(15,23,42,.32)}
-    #${APP.fabId}:active{transform:translateY(0) scale(.96)}
+    /* ===== FAB 悬浮按钮（低调单色，仅 hover 时轻强调） ===== */
+    #${APP.fabId}{position:fixed;width:44px;height:44px;border:1px solid var(--bllmc-border-strong);border-radius:50%;background:var(--bllmc-surface);color:var(--bllmc-muted);box-shadow:var(--bllmc-shadow-fab);cursor:pointer;font:600 15px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;transition:transform .12s ease,box-shadow .12s ease,color .12s ease,border-color .12s ease}
+    #${APP.fabId}:hover{transform:translateY(-1px) scale(1.03);border-color:var(--bllmc-primary);color:var(--bllmc-primary);box-shadow:0 8px 18px rgba(15,23,42,.2)}
+    #${APP.fabId}:active{transform:translateY(0) scale(.97)}
     #${APP.fabId} .bllmc-fab-icon{pointer-events:none}
 
     /* ===== Panel shell ===== */
@@ -1798,19 +1798,22 @@
     #${APP.panelId}::-webkit-scrollbar-thumb,#${APP.panelId} *::-webkit-scrollbar-thumb,.bllmc-settings-dialog::-webkit-scrollbar-thumb,.bllmc-settings-dialog *::-webkit-scrollbar-thumb{background:var(--bllmc-faint);border-radius:var(--bllmc-radius-pill);opacity:.6}
     #${APP.panelId}::-webkit-scrollbar-track,#${APP.panelId} *::-webkit-scrollbar-track,.bllmc-settings-dialog::-webkit-scrollbar-track,.bllmc-settings-dialog *::-webkit-scrollbar-track{background:transparent}
 
-    /* Header（可拖动） */
-    #${APP.panelId} .bllmc-header{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:stretch;justify-content:space-between;background:linear-gradient(135deg,#fb7299 0%,#ff8bad 54%,#22b8ef 140%);color:#fff;cursor:move;user-select:none}
-    #${APP.panelId} .bllmc-header button{border:0;background:transparent;color:#fff;cursor:pointer}
-    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;text-align:left;cursor:pointer}
-    #${APP.panelId} .bllmc-header strong{display:block;font-size:15px;letter-spacing:0}
-    #${APP.panelId} .bllmc-header small{display:block;margin-top:1px;font-size:11px;font-weight:500;opacity:.82}
-    #${APP.panelId} .bllmc-collapse{font-size:18px;line-height:1}
+    /* Header（可拖动）——低调单色，跟随面板背景 */
+    #${APP.panelId} .bllmc-header{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:stretch;justify-content:space-between;background:var(--bllmc-surface);color:var(--bllmc-fg);border-bottom:1px solid var(--bllmc-border);cursor:move;user-select:none}
+    #${APP.panelId} .bllmc-header button{border:0;background:transparent;color:var(--bllmc-muted);cursor:pointer;transition:color .12s ease,background .12s ease}
+    #${APP.panelId} .bllmc-header button:hover{color:var(--bllmc-fg)}
+    #${APP.panelId} .bllmc-header [data-action="collapse"]{flex:1;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 12px;text-align:left;cursor:pointer}
+    #${APP.panelId} .bllmc-header strong{display:inline-block;font-size:13px;font-weight:600;color:var(--bllmc-fg);letter-spacing:0}
+    #${APP.panelId} .bllmc-header small{display:inline-block;margin-left:6px;font-size:11px;font-weight:400;color:var(--bllmc-faint)}
+    #${APP.panelId} .bllmc-header-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${APP.panelId} .bllmc-collapse{font-size:15px;line-height:1;color:var(--bllmc-muted)}
     #${APP.panelId} .bllmc-header-tools{display:flex;align-items:stretch}
-    #${APP.panelId} .bllmc-header-tools button{min-width:42px;padding:0 10px;font-size:12px;border-left:1px solid rgba(255,255,255,.28)!important;background:rgba(255,255,255,.1)!important;display:flex;align-items:center;justify-content:center}
-    #${APP.panelId} .bllmc-header-tools [data-action="theme"]{font-size:15px}
+    #${APP.panelId} .bllmc-header-tools button{min-width:38px;padding:0 9px;font-size:12px;border-left:1px solid var(--bllmc-border)!important;background:transparent!important;color:var(--bllmc-muted);display:flex;align-items:center;justify-content:center}
+    #${APP.panelId} .bllmc-header-tools button:hover{background:var(--bllmc-surface-2)!important;color:var(--bllmc-fg)}
+    #${APP.panelId} .bllmc-header-tools [data-action="theme"]{font-size:14px}
 
     /* Body and sections */
-    #${APP.panelId} .bllmc-body{max-height:calc(100vh - 86px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
+    #${APP.panelId} .bllmc-body{max-height:calc(100vh - 64px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
     #${APP.panelId} .bllmc-body-collapsed{max-height:0;padding-top:0;padding-bottom:0;opacity:0;pointer-events:none}
     #${APP.panelId} .bllmc-section{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--bllmc-border)}
     #${APP.panelId} .bllmc-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
