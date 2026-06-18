@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.3
+// @version      0.6.4
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.3',
+    version: '0.6.4',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -180,12 +180,21 @@
       return null;
     },
     // Shadow DOM root 缓存：避免每次调用都全量遍历 document。
-    // 缓存基于 document 元素树签名（子节点数 + 个别节点 hash），变化时重建。
+    // 签名仅作为快速命中路径；另有全局 MutationObserver 在文档变化时主动失效，
+    // 保证 findAllDeep 等同步调用也能拿到最新的 shadow host 集合。
     _shadowCache: null,
     _shadowCacheSignature: '',
+    _shadowObserver: null,
+    _ensureShadowObserver() {
+      if (this._shadowObserver) return;
+      const observer = new MutationObserver(() => this.invalidateShadowCache());
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      this._shadowObserver = observer;
+    },
     _shadowSignature() {
       const body = document.body;
       if (!body) return '';
+      // 签名覆盖：body 直接子节点 + 全文档 shadow host 数量 + 关键锚点存在性。
       let sig = `${body.children.length}:${body.childElementCount}`;
       let node = body.firstElementChild;
       let i = 0;
@@ -194,12 +203,16 @@
         node = node.nextElementSibling;
         i += 1;
       }
+      // shadow host 总数变化（新增/移除 custom element）是最强失效信号。
+      const hostCount = document.querySelectorAll('*').length;
+      sig += `#hosts=${hostCount}`;
       return sig;
     },
     openRoots(root = document) {
       if (root !== document) {
         return this._openRootsRaw(root);
       }
+      this._ensureShadowObserver();
       const sig = this._shadowSignature();
       if (this._shadowCache && this._shadowCacheSignature === sig) {
         return this._shadowCache;
@@ -402,8 +415,16 @@
         mode,
         processedAt: Date.now(),
       };
-      const entries = Object.entries(records).sort((a, b) => b[1].processedAt - a[1].processedAt).slice(0, 500);
-      GM_setValue(this.keys.processed, Object.fromEntries(entries));
+      // 仅在超过 500 条上限时才做全量排序裁剪，避免每次发布都 O(n log n)。
+      const keys = Object.keys(records);
+      if (keys.length > 500) {
+        const entries = Object.entries(records)
+          .sort((a, b) => b[1].processedAt - a[1].processedAt)
+          .slice(0, 500);
+        GM_setValue(this.keys.processed, Object.fromEntries(entries));
+      } else {
+        GM_setValue(this.keys.processed, records);
+      }
     },
     getPublishStats() {
       const fallback = { date: Util.dateKey(), count: 0, lastPublishedAt: 0 };
@@ -459,11 +480,22 @@
       if (this.isDiscoveryPage()) return 'discovery';
       return 'unsupported';
     },
+    // 风控检测结果缓存 800ms：发布流程前后会连续调用，避免重复 reflow 读取 innerText。
+    _riskCacheAt: 0,
+    _riskCacheValue: false,
     hasRiskPrompt() {
+      const now = Date.now();
+      if (now - this._riskCacheAt < 800) return this._riskCacheValue;
+      this._riskCacheAt = now;
+      // 优先用 selector 检测（便宜），命中即短路；未命中再读 innerText（触发 reflow）。
       const element = Util.findFirst(SELECTORS.riskIndicators);
+      if (element && element.offsetParent !== null) {
+        this._riskCacheValue = true;
+        return true;
+      }
       const bodyText = Util.normalizeText(document.body?.innerText).slice(-3000);
-      return Boolean(element && element.offsetParent !== null)
-        || /验证码|操作频繁|账号存在风险|风控验证/.test(bodyText);
+      this._riskCacheValue = /验证码|操作频繁|账号存在风险|风控验证/.test(bodyText);
+      return this._riskCacheValue;
     },
     loginState() {
       const initial = window.__INITIAL_STATE__;
@@ -763,12 +795,24 @@
         || Util.findFirstVisibleDeep(SELECTORS.commentActivators));
     },
     async waitForCommentEntry(timeoutMs = 1200) {
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < timeoutMs) {
-        if (this.hasCommentEntry()) return true;
-        await Util.sleep(250);
-      }
-      return this.hasCommentEntry();
+      if (this.hasCommentEntry()) return true;
+      // 用 MutationObserver 监听文档变化，评论区懒加载插入即触发检测，
+      // 替代原 250ms 轮询；超时则做最后一次兜底检测。
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          window.clearTimeout(timer);
+          resolve(value);
+        };
+        const observer = new MutationObserver(() => {
+          if (this.hasCommentEntry()) finish(true);
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        const timer = window.setTimeout(() => finish(this.hasCommentEntry()), timeoutMs);
+      });
     },
     async ensureCommentAreaLoaded() {
       if (this.hasCommentEntry()) return false;
@@ -860,9 +904,24 @@
         if (button) return button;
       }
 
-      return Util.findAllDeep(['button']).find((button) =>
-        Util.isVisible(button) && /^发布(?:评论)?$/.test(Util.normalizeText(button.textContent)))
-        || Util.findFirstVisibleDeep(SELECTORS.sendButtons);
+      // 兜底：仅在评论容器范围内查找，避免全文档扫描匹配到无关“发布”按钮。
+      const containers = Util.findAllDeep(SELECTORS.commentContainers)
+        .filter((c) => !this.isOwnPanelElement(c));
+      const scoped = containers.flatMap((container) => {
+        const containerRoots = Util.ancestorRoots(container);
+        return containerRoots.flatMap((root) =>
+          Array.from(root.querySelectorAll('button')));
+      });
+      const fallback = scoped.find((button) =>
+        Util.isVisible(button) && /^发布(?:评论)?$/.test(Util.normalizeText(button.textContent)));
+      if (fallback) return fallback;
+      // 最后退回到选择器匹配（仍限定在评论容器 roots 内）。
+      const containerRoots = containers.flatMap((c) => Util.ancestorRoots(c));
+      for (const root of containerRoots) {
+        const btn = Util.findFirst(SELECTORS.sendButtons, root);
+        if (btn && Util.isVisible(btn)) return btn;
+      }
+      return null;
     },
     async waitForSendButton(editor, timeoutMs = 4000) {
       const startedAt = Date.now();
