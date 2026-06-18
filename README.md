@@ -1,6 +1,6 @@
 # B 站嘴替小助手
 
-[![安装脚本](https://img.shields.io/badge/安装脚本-GitHub-00aeec.svg?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)
+[![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
 [![Version](https://img.shields.io/badge/Version-v0.5.3-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
@@ -23,7 +23,7 @@
 ## 安装
 
 1. 安装脚本管理器：[Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)。
-2. 点击安装脚本：[B 站嘴替小助手](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)。
+2. 打开 Greasy Fork 页面安装脚本：[B 站嘴替小助手](https://greasyfork.org/scripts/583255)。
 3. 登录 B 站，打开形如 `https://www.bilibili.com/video/BV...` 的视频页。
 4. 页面右下角应显示“B 站嘴替小助手”面板。
 
