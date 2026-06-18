@@ -3,17 +3,18 @@
 [![安装脚本](https://img.shields.io/badge/安装脚本-GitHub-00aeec.svg?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.5.2-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.5.3-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
-一个给 B 站视频生成可编辑评论的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，调用 OpenAI-compatible Chat Completions API 生成一条中文评论，并默认让用户预览、编辑后再处理。
+一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。
 
-脚本默认开启测试模式，重点是“辅助生成”和“谨慎发布”，不是批量刷评论工具。
+脚本的核心用途是帮你起草一条贴合视频内容的评论。默认开启测试模式，生成后先预览和编辑，不是批量刷评论工具。
 
 ## 功能
 
 - 当前视频识别：读取 BV 号、标题、简介、UP 主、URL 和最多 10 条当前页面已加载评论。
-- LLM 评论生成：支持 OpenAI-compatible `/chat/completions` 接口。
+- AI 评论生成：调用 OpenAI-compatible `/chat/completions` 接口生成一条中文评论。
 - 风格预设：内置轻松活泼、理性正式、友好鼓励、犀利观点和自定义提示词。
+- 可编辑结果：生成内容会先进入面板文本框，可修改后再填入 B 站评论框。
 - 安全发布流程：默认只填入评论框；关闭测试模式后才会直接发送。
 - 自动发布限频：支持每日自动评论上限、10 分钟间隔、本次运行最多 1 条等保护。
 - 动态页发现：可在动态页、空间动态页、空间视频页扫描当前已渲染的视频链接。
@@ -111,6 +112,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.5.3 (2026-06-18)：调整脚本描述和 README，突出“调用 AI 为 B 站视频生成一条可编辑评论”的核心用途。
 - v0.5.2 (2026-06-18)：补充 userscript `@license MIT` 元信息，满足 Greasy Fork 发布要求。
 - v0.5.1 (2026-06-18)：减少发布流程中的页面滚动跳动。
 - v0.5.0 (2026-06-18)：新增评论风格预设、每日自动评论上限，并重做浮动面板和设置弹窗 UI。

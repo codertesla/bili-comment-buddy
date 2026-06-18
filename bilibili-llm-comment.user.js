@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.5.2
-// @description  为当前 B 站视频生成可编辑的相关评论，默认测试模式，支持受限自动发布。
+// @version      0.5.3
+// @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
 // @icon         https://www.bilibili.com/favicon.ico
@@ -29,7 +29,7 @@
   const APP = Object.freeze({
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
-    version: '0.5.2',
+    version: '0.5.3',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
