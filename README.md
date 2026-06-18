@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/badge/安装脚本-GitHub-00aeec.svg?style=for-the-badge&logo=tampermonkey)](https://raw.githubusercontent.com/codertesla/bili-comment-buddy/main/bilibili-llm-comment.user.js)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.5.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.5.2-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个给 B 站视频生成可编辑评论的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，调用 OpenAI-compatible Chat Completions API 生成一条中文评论，并默认让用户预览、编辑后再处理。
 
@@ -111,6 +111,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.5.2 (2026-06-18)：补充 userscript `@license MIT` 元信息，满足 Greasy Fork 发布要求。
 - v0.5.1 (2026-06-18)：减少发布流程中的页面滚动跳动。
 - v0.5.0 (2026-06-18)：新增评论风格预设、每日自动评论上限，并重做浮动面板和设置弹窗 UI。
 - v0.4.1 (2026-06-18)：增强自动发布保护、日志和设置弹窗。
