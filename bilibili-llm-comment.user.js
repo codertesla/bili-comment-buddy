@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.8
+// @version      0.6.9
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.8',
+    version: '0.6.9',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -92,7 +92,7 @@
 2. 长度为 20～100 个中文字符（标点计入即可，不必机械计数）。
 3. 评论必须关联给定视频的具体内容，但不要直接复述标题。
 4. 不要声称“作为 AI”，不要编造输入中没有的事实。
-5. 可以参考已有高赞评论里的观点角度和讨论焦点来增强与视频的相关性，但不要逐字抄写、改写或拼凑其措辞，必须用自己的话表达。
+5. 可以参考给定的标签、分区、置顶评论和高赞评论里的观点角度与讨论焦点来增强与视频的相关性，但不要逐字抄写、改写或拼凑其措辞，必须用自己的话表达。
 6. 避免空洞套话、夸张吹捧、引战和营销语气。
 7. 默认不使用 emoji。`;
 
@@ -532,6 +532,9 @@
         title: Util.normalizeText(vd.title),
         description: Util.normalizeText(vd.desc),
         uploader: Util.normalizeText(vd.owner?.name),
+        tname: Util.normalizeText(vd.tname),
+        duration: Number(vd.duration) || 0,
+        tags: Array.isArray(vd.tag) ? vd.tag.map((t) => Util.normalizeText(t)).filter(Boolean) : [],
       };
     },
     /** Promise-wrapped GM_xmlhttpRequest for internal use. */
@@ -567,29 +570,74 @@
       } catch (_) { /* will return 0 below */ }
       return 0;
     },
-    /** Fetch hot comments via B站's public reply API (no DOM / scrolling needed). */
-    async fetchCommentsViaAPI(aid) {
+    /** Fetch video tags via B站's public tag API. __INITIAL_STATE__ 里的 tag 字段
+     *  并不稳定存在，这里用 API 兜底；失败返回空数组，不影响主流程。 */
+    async fetchTags(aid) {
       if (!aid) return [];
       try {
         const data = await this.gmFetch(
-          `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${APP.maxComments}`
+          `https://api.bilibili.com/x/tag/archive/tags?aid=${aid}`
         );
-        const replies = data?.data?.replies;
-        if (!Array.isArray(replies)) return [];
-        const seen = new Set();
-        return replies
-          .map((r) => ({ text: Util.normalizeText(r?.content?.message), likes: Number(r?.like) || 0 }))
-          .filter((c) => {
-            const key = c.text.toLowerCase();
-            return this.isUsefulComment(c.text) && !seen.has(key) && seen.add(key);
-          })
-          .sort((a, b) => b.likes - a.likes)
-          .slice(0, APP.maxComments);
+        const tags = data?.data;
+        if (!Array.isArray(tags)) return [];
+        return tags.map((t) => Util.normalizeText(t?.tag_name || t?.name)).filter(Boolean).slice(0, 12);
       } catch (_) {
         return [];
       }
     },
-    /** DOM-based comment extraction (fallback when API is unavailable). */
+    /** Fetch hot comments via B站's public reply API (no DOM / scrolling needed).
+     *  返回 { top: [UP 主置顶评论], hot: [高赞评论，可能含少量二级回复] }。 */
+    async fetchCommentsViaAPI(aid) {
+      const empty = { top: [], hot: [] };
+      if (!aid) return empty;
+      try {
+        // ps 取 30：mode=3 前若干条会混入置顶/运营位，多抓再客户端按 likes 精筛。
+        const data = await this.gmFetch(
+          `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=30`
+        );
+        const topReplies = data?.data?.top_replies?.replies;
+        const replies = data?.data?.replies;
+        const seen = new Set();
+        const collect = (arr, limit) => {
+          if (!Array.isArray(arr)) return [];
+          return arr
+            .map((r) => ({ text: Util.normalizeText(r?.content?.message), likes: Number(r?.like) || 0 }))
+            .filter((c) => {
+              const key = c.text.toLowerCase();
+              return this.isUsefulComment(c.text) && !seen.has(key) && seen.add(key);
+            })
+            .sort((a, b) => b.likes - a.likes)
+            .slice(0, limit);
+        };
+        const top = collect(topReplies, 3);
+        const hot = collect(replies, APP.maxComments);
+        // 补充少量高赞二级回复（楼中楼），通常含对视频细节的具体讨论。
+        if (Array.isArray(replies)) {
+          const subSeen = new Set(seen);
+          const subs = [];
+          for (const r of replies) {
+            const inner = r?.replies;
+            if (!Array.isArray(inner)) continue;
+            for (const ir of inner) {
+              const text = Util.normalizeText(ir?.content?.message);
+              if (!this.isUsefulComment(text)) continue;
+              const key = text.toLowerCase();
+              if (subSeen.has(key)) continue;
+              subSeen.add(key);
+              subs.push({ text, likes: Number(ir?.like) || 0 });
+            }
+          }
+          subs.sort((a, b) => b.likes - a.likes);
+          // 取前 3 条高赞二级回复追加到 hot 末尾。
+          for (const s of subs.slice(0, 3)) hot.push(s);
+        }
+        return { top, hot };
+      } catch (_) {
+        return empty;
+      }
+    },
+    /** DOM-based comment extraction (fallback when API is unavailable).
+     *  DOM 兜底无法可靠识别置顶评论，统一放到 hot。 */
     extractComments() {
       const itemSet = new Set(Util.findAllDeep(SELECTORS.commentItems));
       const seen = new Set();
@@ -603,13 +651,15 @@
         const likeElement = Util.findFirstDeep(SELECTORS.commentLike, itemRoot);
         comments.push({ text: Util.truncate(text, 260), likes: Util.parseCount(Util.readElement(likeElement)) });
       }
-      return comments.sort((a, b) => b.likes - a.likes).slice(0, APP.maxComments);
+      return { top: [], hot: comments.sort((a, b) => b.likes - a.likes).slice(0, APP.maxComments) };
     },
     isUsefulComment(text) {
       if (!text || text.length < 6) return false;
       if (!/[\u3400-\u9fffA-Za-z0-9]/.test(text)) return false;
       if (/^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}\s~～!！?？。,.，])+$/u.test(text)) return false;
       if (/(加群|VX|微信|兼职|代刷|返利|点击链接|私信.*领取|课程优惠)/i.test(text)) return false;
+      // 过滤无内容信息量的“元评论”：纯互动/占位/催更，避免稀释相关性素材。
+      if (/^(一键)?三连$|^(前排|沙发|第一|板凳|地板|抢个沙发)$|^催更$|^更新了$|^加更$|^催更了$|^求三连$/i.test(text)) return false;
       return true;
     },
     async currentVideo() {
@@ -629,10 +679,24 @@
       if (!uploader) throw new Error('未找到 UP 主名称，B 站页面结构可能已变化。');
 
       const aid = await this.getAid(bvid);
-      let comments = await this.fetchCommentsViaAPI(aid);
+      // 标签：优先 __INITIAL_STATE__，不足再用标签 API 补齐。
+      let tags = Array.isArray(stateData?.tags) ? stateData.tags : [];
+      if (tags.length < 3 && aid) {
+        const apiTags = await this.fetchTags(aid);
+        const merged = new Set([...tags, ...apiTags]);
+        tags = Array.from(merged).slice(0, 12);
+      }
+      const tname = stateData?.tname || '';
+      const duration = Number(stateData?.duration) || 0;
+
+      const fetched = await this.fetchCommentsViaAPI(aid);
+      let topComments = fetched.top;
+      let comments = fetched.hot;
       let commentsSource = comments.length ? 'API' : 'none';
       if (!comments.length) {
-        comments = this.extractComments();
+        const dom = this.extractComments();
+        topComments = dom.top;
+        comments = dom.hot;
         commentsSource = comments.length ? 'DOM' : 'none';
       }
       return {
@@ -640,7 +704,11 @@
         title: Util.truncate(title.replace(/_哔哩哔哩.*$/i, ''), 200),
         description: Util.truncate(description, APP.maxDescriptionChars),
         uploader: Util.truncate(uploader, 100),
+        tname,
+        duration,
+        tags,
         url: `${location.origin}/video/${bvid}`,
+        topComments,
         comments,
         commentsSource,
       };
@@ -673,10 +741,24 @@
       return /\/chat\/completions$/i.test(clean) ? clean : `${clean}/chat/completions`;
     },
     buildUserPrompt(video, style) {
+      // 分区/时长/标签：浓缩的内容关键词，相关性锚点。
+      const metaParts = [];
+      if (video.tname) metaParts.push(`分区：${video.tname}`);
+      if (video.duration) metaParts.push(`时长：${video.duration} 秒`);
+      if (Array.isArray(video.tags) && video.tags.length) {
+        metaParts.push(`标签：${video.tags.slice(0, 12).join('、')}`);
+      }
+      const metaLine = metaParts.length ? `\n${metaParts.join('\n')}` : '';
+
+      // UP 主置顶评论：通常是 UP 主对视频内容的补充说明，强相关性信号。
+      const topLine = video.topComments && video.topComments.length
+        ? `\n\nUP 主/置顶评论（理解视频主旨的重要参考，但仍不要逐字抄写其措辞）：\n${video.topComments.map((item, index) => `${index + 1}. ${item.text}`).join('\n')}`
+        : '';
+
       const commentLines = video.comments.length
         ? video.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n')
         : '（当前页面尚未加载到可用评论；不要据此猜测视频内容。）';
-      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}\n简介：${video.description || '未提供'}\n评论风格：${style}\n\n已有高赞评论（可参考其中对视频内容的理解与观众关注点来增强相关性，但不要逐字抄写或拼凑其措辞）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
+      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}${metaLine}\n简介：${video.description || '未提供'}\n评论风格：${style}${topLine}\n\n已有高赞评论（可参考其中对视频内容的理解与观众关注点来增强相关性，但不要逐字抄写或拼凑其措辞）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
     },
     request(config, video, attempt = 0) {
       const endpoint = this.endpoint(config.baseUrl);
@@ -1681,7 +1763,9 @@
         this.setStatus(`已识别 ${video.bvid}${suffix}`);
         const sourceText = video.commentsSource === 'API' ? 'API 热门评论'
           : video.commentsSource === 'DOM' ? '页面 DOM 评论' : '无评论上下文';
-        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）。`);
+        const tagText = video.tags?.length ? `，${video.tags.length} 个标签` : '';
+        const topText = video.topComments?.length ? `，${video.topComments.length} 条置顶` : '';
+        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）${tagText}${topText}。`);
         if (Store.isProcessed(video.bvid)) this.log('该 BV 号已有处理记录，不会重复发布。', 'warn');
         return;
       }
