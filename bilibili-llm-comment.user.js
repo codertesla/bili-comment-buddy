@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.9
+// @version      0.7.0
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,12 +30,13 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.9',
+    version: '0.7.0',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
     maxDescriptionChars: 1200,
     maxCommentContextChars: 1800,
+    maxSubtitleChars: 2000,
     minPublishIntervalMs: 10 * 60 * 1000,
     routeDebounceMs: 800,
     commentMin: 20,
@@ -90,7 +91,7 @@
   const SYSTEM_PROMPT = `你负责为 B 站视频撰写一条中文评论。严格遵守：
 1. 只返回评论正文，不要引号、标签、解释或前后缀。
 2. 长度为 20～100 个中文字符（标点计入即可，不必机械计数）。
-3. 评论必须关联给定视频的具体内容，但不要直接复述标题。
+3. 评论必须关联给定视频的具体内容，但不要直接复述标题。若有视频字幕，以字幕内容为理解视频的最主要依据。
 4. 不要声称“作为 AI”，不要编造输入中没有的事实。
 5. 可以参考给定的标签、分区、置顶评论和高赞评论里的观点角度与讨论焦点来增强与视频的相关性，但不要逐字抄写、改写或拼凑其措辞，必须用自己的话表达。
 6. 避免空洞套话、夸张吹捧、引战和营销语气。
@@ -529,6 +530,7 @@
       const vd = s.videoData || s;
       return {
         aid: Number(vd.aid) || 0,
+        cid: Number(vd.cid) || 0,
         title: Util.normalizeText(vd.title),
         description: Util.normalizeText(vd.desc),
         uploader: Util.normalizeText(vd.owner?.name),
@@ -558,17 +560,76 @@
         });
       });
     },
-    /** Resolve the numeric aid for the current video (needed by the comment API). */
-    async getAid(bvid) {
+    /** Resolve {aid, cid} for the current video. cid 用于抓字幕，aid 用于评论/标签 API。 */
+    async getAidAndCid(bvid) {
       const state = this.initialState();
-      if (state?.aid) return state.aid;
+      let aid = Number(state?.aid) || 0;
+      let cid = Number(state?.cid) || 0;
+      if (aid && cid) return { aid, cid };
       const aidAttr = document.querySelector('[data-aid]')?.dataset?.aid;
-      if (aidAttr && Number(aidAttr)) return Number(aidAttr);
+      if (aidAttr && Number(aidAttr) && !aid) aid = Number(aidAttr);
+      if (!aid || !cid) {
+        try {
+          const data = await this.gmFetch(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
+          if (data?.data?.aid) aid = data.data.aid;
+          if (data?.data?.cid) cid = data.data.cid;
+        } catch (_) { /* will return what we have below */ }
+      }
+      return { aid, cid };
+    },
+    /** 抓取 CC 字幕：player/v2 → 选 zh 字幕 → 取 json → 拼接 body[].content。
+     *  返回字幕纯文本（已限长）；无字幕或失败返回空字符串，调用方回退原逻辑。 */
+    async fetchSubtitle(aid, cid) {
+      if (!aid || !cid) return '';
       try {
-        const data = await this.gmFetch(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
-        if (data?.data?.aid) return data.data.aid;
-      } catch (_) { /* will return 0 below */ }
-      return 0;
+        const player = await this.gmFetch(
+          `https://api.bilibili.com/x/player/v2?aid=${aid}&cid=${cid}`,
+          8000
+        );
+        const subs = player?.data?.subtitle?.subtitles;
+        if (!Array.isArray(subs) || !subs.length) return '';
+        // 优先中文简体/繁体，其次任意第一条有 URL 的字幕。
+        const pick = subs.find((s) => /^zh/i.test(s?.lan) && s?.subtitle_url)
+          || subs.find((s) => s?.subtitle_url);
+        if (!pick?.subtitle_url) return '';
+        const subUrl = pick.subtitle_url.startsWith('//') ? `https:${pick.subtitle_url}` : pick.subtitle_url;
+        const subJson = await this.gmFetch(subUrl, 10000);
+        const body = subJson?.body;
+        if (!Array.isArray(body) || !body.length) return '';
+        const full = this.compressSubtitle(body);
+        if (!full) return '';
+        if (full.length <= APP.maxSubtitleChars) return full;
+        // 超长保留首尾各一半，避免线性截断丢失结尾结论。
+        const half = Math.floor(APP.maxSubtitleChars / 2);
+        return `${full.slice(0, half)} …（中间省略）… ${full.slice(-half)}`;
+      } catch (_) {
+        return '';
+      }
+    },
+    /** 压缩字幕：只取 content，合并断句，过滤语气词，句间换行作为隔断。
+     *  相比简单 join(' ')，去掉了无用空格和语气词，同样长度限制下能塞进更多有效内容。 */
+    compressSubtitle(body) {
+      // 纯语气词/口头禅片段，无信息量，过滤。
+      const fillerRe = /^(?:嗯|啊|呃|哦|唉|哈|嗨|呐|嘛|诶|那个|就是|然后|所以|这个|的话|对吧|你知道吗|我想想)[。.，,！!？?…~～]*$/;
+      // 句末标点：遇到则断句。
+      const endRe = /[。.！!？?；;]/;
+      const sentences = [];
+      let current = '';
+      for (const item of body) {
+        const text = Util.normalizeText(item?.content);
+        if (!text || fillerRe.test(text)) continue;
+        current += text;
+        if (endRe.test(text)) {
+          sentences.push(current);
+          current = '';
+        } else if (current.length > 80) {
+          // 长时间无标点，强制断句避免无限合并。
+          sentences.push(current);
+          current = '';
+        }
+      }
+      if (current) sentences.push(current);
+      return sentences.join('\n');
     },
     /** Fetch video tags via B站's public tag API. __INITIAL_STATE__ 里的 tag 字段
      *  并不稳定存在，这里用 API 兜底；失败返回空数组，不影响主流程。 */
@@ -678,7 +739,12 @@
       if (!title) throw new Error('未找到视频标题，B 站页面结构可能已变化。');
       if (!uploader) throw new Error('未找到 UP 主名称，B 站页面结构可能已变化。');
 
-      const aid = await this.getAid(bvid);
+      const { aid, cid } = await this.getAidAndCid(bvid);
+      // 字幕：CC 字幕是视频实际内容的直接来源，优先于评论素材。
+      // 无字幕（游戏录屏/纯音乐/未登录拿不到）则回退到标签+评论逻辑。
+      const subtitle = await this.fetchSubtitle(aid, cid);
+      const hasSubtitle = Boolean(subtitle);
+
       // 标签：优先 __INITIAL_STATE__，不足再用标签 API 补齐。
       let tags = Array.isArray(stateData?.tags) ? stateData.tags : [];
       if (tags.length < 3 && aid) {
@@ -707,6 +773,8 @@
         tname,
         duration,
         tags,
+        subtitle,
+        hasSubtitle,
         url: `${location.origin}/video/${bvid}`,
         topComments,
         comments,
@@ -755,10 +823,16 @@
         ? `\n\nUP 主/置顶评论（理解视频主旨的重要参考，但仍不要逐字抄写其措辞）：\n${video.topComments.map((item, index) => `${index + 1}. ${item.text}`).join('\n')}`
         : '';
 
+      // CC 字幕：视频实际内容的直接来源，相关性的主锚点。
+      // 有字幕时放在简介后，作为 AI 理解视频的最主要依据。
+      const subtitleLine = video.hasSubtitle
+        ? `\n\n视频字幕（这是视频实际讲的内容，是写评论的最主要依据，可能不完整）：\n${video.subtitle}`
+        : '';
+
       const commentLines = video.comments.length
         ? video.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n')
         : '（当前页面尚未加载到可用评论；不要据此猜测视频内容。）';
-      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}${metaLine}\n简介：${video.description || '未提供'}\n评论风格：${style}${topLine}\n\n已有高赞评论（可参考其中对视频内容的理解与观众关注点来增强相关性，但不要逐字抄写或拼凑其措辞）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
+      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}${metaLine}\n简介：${video.description || '未提供'}\n评论风格：${style}${subtitleLine}${topLine}\n\n已有高赞评论（可参考其中对视频内容的理解与观众关注点来增强相关性，但不要逐字抄写或拼凑其措辞）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
     },
     request(config, video, attempt = 0) {
       const endpoint = this.endpoint(config.baseUrl);
@@ -1765,7 +1839,8 @@
           : video.commentsSource === 'DOM' ? '页面 DOM 评论' : '无评论上下文';
         const tagText = video.tags?.length ? `，${video.tags.length} 个标签` : '';
         const topText = video.topComments?.length ? `，${video.topComments.length} 条置顶` : '';
-        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）${tagText}${topText}。`);
+        const subText = video.hasSubtitle ? `，字幕 ${video.subtitle.length} 字` : '，无 CC 字幕（回退评论素材）';
+        this.log(`提取完成：${video.comments.length} 条可用评论（${sourceText}）${tagText}${topText}${subText}。`);
         if (Store.isProcessed(video.bvid)) this.log('该 BV 号已有处理记录，不会重复发布。', 'warn');
         return;
       }
