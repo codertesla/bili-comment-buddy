@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.6.7
+// @version      0.6.8
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.6.7',
+    version: '0.6.8',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -92,7 +92,7 @@
 2. 长度为 20～100 个中文字符（标点计入即可，不必机械计数）。
 3. 评论必须关联给定视频的具体内容，但不要直接复述标题。
 4. 不要声称“作为 AI”，不要编造输入中没有的事实。
-5. 不要模仿、改写或拼接已有评论。
+5. 可以参考已有高赞评论里的观点角度和讨论焦点来增强与视频的相关性，但不要逐字抄写、改写或拼凑其措辞，必须用自己的话表达。
 6. 避免空洞套话、夸张吹捧、引战和营销语气。
 7. 默认不使用 emoji。`;
 
@@ -676,7 +676,7 @@
       const commentLines = video.comments.length
         ? video.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n')
         : '（当前页面尚未加载到可用评论；不要据此猜测视频内容。）';
-      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}\n简介：${video.description || '未提供'}\n评论风格：${style}\n\n已有高赞评论（仅用于避免重复观点和措辞，不得模仿）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
+      return `请根据以下信息写一条评论。\n\nUP 主：${video.uploader}\n标题：${video.title}\n简介：${video.description || '未提供'}\n评论风格：${style}\n\n已有高赞评论（可参考其中对视频内容的理解与观众关注点来增强相关性，但不要逐字抄写或拼凑其措辞）：\n${Util.truncate(commentLines, APP.maxCommentContextChars)}`;
     },
     request(config, video, attempt = 0) {
       const endpoint = this.endpoint(config.baseUrl);

@@ -3,16 +3,16 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.6.7-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.6.8-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
-一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的评论上下文，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。
+一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主和页面中已加载的高赞评论，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。高赞评论会作为理解视频实际内容与观众关注点的参考素材发给 AI，以提升生成评论与视频的相关性。
 
 脚本的核心用途是帮你起草一条贴合视频内容的评论。默认开启测试模式，生成后先预览和编辑，不是批量刷评论工具。
 
 ## 功能
 
-- 当前视频识别：读取 BV 号、标题、简介、UP 主、URL 和最多 10 条当前页面已加载评论。
-- AI 评论生成：调用 OpenAI-compatible `/chat/completions` 接口生成一条中文评论。
+- 当前视频识别：读取 BV 号、标题、简介、UP 主、URL 和最多 10 条高赞评论（按热度排序）。
+- AI 评论生成：调用 OpenAI-compatible `/chat/completions` 接口生成一条中文评论；高赞评论作为参考素材随 prompt 一起发送，帮助 AI 贴合视频实际内容与观众讨论焦点。
 - 风格预设：内置轻松活泼、理性正式、友好鼓励、犀利观点和自定义提示词。
 - 可编辑结果：生成内容会先进入面板文本框，可修改后再填入 B 站评论框。
 - 安全发布流程：默认只填入评论框；关闭测试模式后才会直接发送。
@@ -99,7 +99,7 @@
 <details>
 <summary><b>为什么需要滚动到评论区？</b></summary>
 
-B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得更完整的评论上下文，也能提高找到评论编辑器的成功率。
+B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得更完整的评论上下文，也能提高找到评论编辑器的成功率。高赞评论会作为参考素材发给 AI，帮助它更准确地贴合视频实际内容，因此评论越多、越完整，生成评论的相关性通常越强。
 </details>
 
 <details>
@@ -116,6 +116,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.6.8 (2026-06-19)：调整高赞评论在 prompt 中的定位——从“仅用于避免撞车、禁止参考”改为“可作为理解视频实际内容与观众关注点的参考素材”，允许 AI 借鉴其中的观点角度以提升相关性，但仍禁止逐字抄写、改写或拼凑其措辞，保留原创性。SYSTEM_PROMPT 第 5 条与 `buildUserPrompt` 中对高赞评论的描述同步更新。
 - v0.6.7 (2026-06-18)：缩短 Header 副标题"智能生成 · 审慎发布"→"AI 嘴替"，腾出空间避免"设置"按钮文字上下换行。
 - v0.6.6 (2026-06-18)：收窄面板宽度 384px→320px，主操作按钮 min-width 104px→92px，窄屏全宽断点 520px→420px，整体更紧凑。
 - v0.6.5 (2026-06-18)：UI 低调化。Header 由粉蓝渐变大色块改为跟随面板背景的单色栏，标题与副标题改为同行小字，padding 收紧，按钮用 muted 色而非反白；FAB 由粉蓝渐变改为单色描边圆点，仅 hover 时轻强调；面板 body 最大高度同步调整。
