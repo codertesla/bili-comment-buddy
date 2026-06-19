@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.7.0-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.7.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主、分区、时长、标签、CC 字幕以及页面中已加载的高赞评论与置顶评论，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。CC 字幕作为视频实际内容的直接来源（主锚点），标签、分区和置顶/高赞评论作为辅助参考素材，共同提升生成评论与视频的相关性。无 CC 字幕时自动回退到标签+评论逻辑。
 
@@ -116,6 +116,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.7.1 (2026-06-19)：UI 体验改进。视频信息卡片补全分区、时长、标签 chips 和字幕状态徽章（有字幕显示字符数，无字幕提示回退）；设置弹窗加 dirty 跟踪，有未保存改动时点遮罩/ESC/取消会二次确认，避免误关丢草稿；主操作按钮（检查/生成/发布）执行中显示“正在检查…/正在生成…/正在发布…”进行中文案，结束后恢复原文案。
 - v0.7.0 (2026-06-19)：新增 CC 字幕作为视频内容主锚点。通过 `player/v2` 接口抓取 CC 字幕（优先中文简繁体），压缩处理后（提取 content、合并断句、过滤语气词、句间换行、限长 2000 字保留首尾）作为视频实际内容发给 AI，使 AI 从“靠标题+评论间接推断”升级为“直接看到视频讲了什么”，相关性显著提升。无 CC 字幕时自动回退到 v0.6.9 的标签+评论逻辑。`getAid` 升级为 `getAidAndCid` 同步取 cid，`buildUserPrompt` 优先用字幕，`SYSTEM_PROMPT` 第 3 条说明字幕为最主要依据，检查日志补充字幕字符数。
 - v0.6.9 (2026-06-19)：扩充发给 AI 的相关性素材。新增抓取视频分区、时长、标签（`__INITIAL_STATE__` 优先，标签 API 兜底）；单独提取 UP 主/置顶评论并在 prompt 中标注为"理解视频主旨的重要参考"；评论 API 抓取量从 10 扩到 30 再客户端按点赞精筛，并补充少量高赞二级回复（楼中楼）；过滤"三连/前排/沙发/催更"等无内容信息量的元评论，避免稀释相关性信号。`buildUserPrompt` 拼入分区/时长/标签/置顶评论，SYSTEM_PROMPT 第 5 条同步覆盖新增参考素材范围。
 - v0.6.8 (2026-06-19)：调整高赞评论在 prompt 中的定位——从“仅用于避免撞车、禁止参考”改为“可作为理解视频实际内容与观众关注点的参考素材”，允许 AI 借鉴其中的观点角度以提升相关性，但仍禁止逐字抄写、改写或拼凑其措辞，保留原创性。SYSTEM_PROMPT 第 5 条与 `buildUserPrompt` 中对高赞评论的描述同步更新。

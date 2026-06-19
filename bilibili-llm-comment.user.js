@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.7.0
+// @version      0.7.1
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.7.0',
+    version: '0.7.1',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1314,13 +1314,13 @@
         this.controller.openSettings();
       });
       panel.querySelector('[data-action="check"]').addEventListener('click', () => {
-        this.controller.run(() => this.controller.check());
+        this.controller.run(() => this.controller.check(), '正在检查…');
       });
       panel.querySelector('[data-action="generate"]').addEventListener('click', () => {
-        this.controller.run(() => this.controller.generate());
+        this.controller.run(() => this.controller.generate(), '正在生成…');
       });
       panel.querySelector('[data-action="publish"]').addEventListener('click', () => {
-        this.controller.run(() => this.controller.publish(false));
+        this.controller.run(() => this.controller.publish(false), '正在发布…');
       });
       panel.querySelector('[data-action="retry"]').addEventListener('click', () => {
         this.controller.retryLast();
@@ -1448,11 +1448,30 @@
       this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit} · ≥ 10 分钟`;
     }
 
-    setBusy(busy) {
+    setBusy(busy, label) {
       if (!this.panel) return;
       this.panel.classList.toggle('bllmc-busy', busy);
       const buttons = Array.from(this.panel.querySelectorAll('.bllmc-body button'));
       buttons.forEach((button) => { button.disabled = busy; });
+      // 触发操作的主按钮在 busy 时显示进行中文案，让用户明确知道当前在干什么。
+      // 三个主操作按钮按 label 匹配：哪个按钮当前可见且非重试/日志按钮，就更新哪个。
+      const primaryBtn = this.elements.generate;
+      const publishBtn = this.elements.publishButton;
+      const restore = (btn, key) => {
+        if (btn && this[key] != null) { btn.textContent = this[key]; this[key] = null; }
+      };
+      const apply = (btn, key) => {
+        if (btn && busy && label) { this[key] = btn.textContent; btn.textContent = label; }
+      };
+      if (busy && label) {
+        // generate 和 publish 都可能被触发；只改当前操作对应的按钮。
+        // 通过 label 关键词判断：检查/生成 -> generate 按钮；发布 -> publish 按钮。
+        if (/发布/.test(label)) { apply(publishBtn, '_publishLabel'); }
+        else { apply(primaryBtn, '_generateLabel'); }
+      } else {
+        restore(primaryBtn, '_generateLabel');
+        restore(publishBtn, '_publishLabel');
+      }
     }
 
     showRetry(show) {
@@ -1475,8 +1494,29 @@
 
     renderVideo(video) {
       if (!this.elements.video) return;
+      const metaChips = [];
+      metaChips.push(`<span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span>`);
+      metaChips.push(`<span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span>`);
+      if (video.tname) metaChips.push(`<span class="bllmc-tag">分区：${Util.escapeHtml(video.tname)}</span>`);
+      if (video.duration) {
+        const mins = Math.floor(video.duration / 60);
+        const secs = video.duration % 60;
+        metaChips.push(`<span class="bllmc-tag">时长 ${mins}:${String(secs).padStart(2, '0')}</span>`);
+      }
+      // 字幕状态：有字幕用 success 色突出，无字幕用 warn 色提示回退。
+      if (video.hasSubtitle) {
+        metaChips.push(`<span class="bllmc-badge bllmc-badge-success">字幕 ${video.subtitle.length} 字</span>`);
+      } else {
+        metaChips.push(`<span class="bllmc-badge bllmc-badge-warn">无 CC 字幕</span>`);
+      }
+      metaChips.push(`<span class="bllmc-badge">${video.comments.length} 条评论</span>`);
+      if (video.topComments?.length) metaChips.push(`<span class="bllmc-tag">置顶 ${video.topComments.length}</span>`);
+      // 标签单独一行，避免与 meta chips 混挤。
+      const tagLine = video.tags?.length
+        ? `<div class="bllmc-video-tags">${video.tags.slice(0, 12).map((t) => `<span class="bllmc-tag">${Util.escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
       this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
-        <div class="bllmc-video-meta"><span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span><span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span><span class="bllmc-badge">${video.comments.length} 条评论上下文</span></div>
+        <div class="bllmc-video-meta">${metaChips.join('')}</div>${tagLine}
         <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
     }
 
@@ -1580,7 +1620,18 @@
         }
       });
 
-      const close = () => this.close();
+      // dirty 跟踪：任意设置项改动即标记，关闭时若有未保存改动则二次确认，避免误点遮罩/ESC 丢草稿。
+      let dirty = false;
+      const markDirty = () => { dirty = true; };
+      overlay.querySelectorAll('[data-setting]').forEach((input) => {
+        input.addEventListener('input', markDirty);
+        input.addEventListener('change', markDirty);
+      });
+
+      const close = () => {
+        if (dirty && !window.confirm('设置有未保存的改动，确定关闭吗？')) return;
+        this.close();
+      };
       const onKeydown = (event) => { if (event.key === 'Escape') close(); };
       overlay.querySelector('[data-settings-action="close"]').addEventListener('click', close);
       overlay.querySelector('[data-settings-action="cancel"]').addEventListener('click', close);
@@ -1804,11 +1855,12 @@
       }
     }
 
-    async run(operation) {
+    async run(operation, busyLabel) {
       if (this.busy) return;
       this.busy = true;
       this.lastOperation = operation;
-      this.view.setBusy(true);
+      this.lastBusyLabel = busyLabel || '';
+      this.view.setBusy(true, busyLabel);
       try {
         await operation();
       } catch (error) {
@@ -1823,7 +1875,7 @@
 
     retryLast() {
       if (this.busy || !this.lastOperation) return;
-      this.run(this.lastOperation);
+      this.run(this.lastOperation, this.lastBusyLabel);
     }
 
     async check() {
@@ -2021,11 +2073,15 @@
     #${APP.panelId} .bllmc-counter-over{color:var(--bllmc-error);font-weight:600}
 
     /* Video summary */
-    #${APP.panelId} [data-role="video"]{max-height:126px;overflow:auto;word-break:break-word}
+    #${APP.panelId} [data-role="video"]{max-height:180px;overflow:auto;word-break:break-word}
     #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:var(--bllmc-fg);font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     #${APP.panelId} .bllmc-video-meta{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+    #${APP.panelId} .bllmc-video-tags{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
+    #${APP.panelId} .bllmc-video-tags .bllmc-tag{padding:2px 7px;font-size:10px}
     #${APP.panelId} .bllmc-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-pill);background:var(--bllmc-surface);color:var(--bllmc-muted);font-size:11px}
     #${APP.panelId} .bllmc-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:var(--bllmc-radius-pill);background:#e8f7ff;color:#0077a8;font-size:11px;font-weight:600}
+    #${APP.panelId} .bllmc-badge-success{background:#e6f5ec;color:#18864b}
+    #${APP.panelId} .bllmc-badge-warn{background:var(--bllmc-warn-bg);color:var(--bllmc-warn-fg)}
 
     /* Logs */
     #${APP.panelId} .bllmc-details{margin-top:10px;border-top:1px solid var(--bllmc-border)}
@@ -2067,6 +2123,8 @@
 
     /* Dark badge override (auto + manual) */
     #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge{background:#12384a;color:#7bd6ff}
+    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge-success{background:#1a3a28;color:#4eaf7a}
+    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge-warn{background:#3a3018;color:#f0ce7a}
 
     /* Narrow screens */
     @media(max-width:420px){
