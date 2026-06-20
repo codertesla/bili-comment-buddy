@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.8.0
+// @version      0.8.1
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,14 +30,14 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.8.0',
+    version: '0.8.1',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
     maxDescriptionChars: 1200,
     maxCommentContextChars: 1800,
     maxSubtitleChars: 2000,
-    minPublishIntervalMs: 10 * 60 * 1000,
+    minPublishIntervalMs: 30 * 1000,
     routeDebounceMs: 800,
     commentMin: 20,
     commentMax: 100,
@@ -1013,7 +1013,7 @@
           throw new Error(`今天已达到自动发布上限 ${config.dailyAutoPublishLimit} 条。`);
         }
         const remaining = APP.minPublishIntervalMs - (Date.now() - stats.lastPublishedAt);
-        if (remaining > 0) throw new Error(`距离上次发布不足 10 分钟，还需等待 ${Math.ceil(remaining / 60000)} 分钟。`);
+        if (remaining > 0) throw new Error(`距离上次发布不足 30 秒，还需等待 ${Math.ceil(remaining / 1000)} 秒。`);
       }
       return comment;
     },
@@ -1437,14 +1437,14 @@
     updateQuotaUI() {
       if (!this.elements.quota) return;
       const stats = Store.getPublishStats();
-      this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit} · ≥ 10 分钟`;
+      this.elements.quota.textContent = `今日 ${stats.count}/${this.config.dailyAutoPublishLimit}`;
     }
 
     setBusy(busy, label) {
       if (!this.panel) return;
       this.panel.classList.toggle('bllmc-busy', busy);
       const buttons = Array.from(this.panel.querySelectorAll('.bllmc-body button'));
-      buttons.forEach((button) => { button.disabled = busy; });
+      buttons.forEach((button) => { button.disabled = busy; button.classList.remove('bllmc-spinning'); });
       const generateBtn = this.elements.generateButton;
       const fillBtn = this.elements.fillButton;
       const publishBtn = this.elements.publishButton;
@@ -1452,7 +1452,7 @@
         if (btn && this[key] != null) { btn.textContent = this[key]; this[key] = null; }
       };
       const apply = (btn, key) => {
-        if (btn && busy && label) { this[key] = btn.textContent; btn.textContent = label; }
+        if (btn && busy && label) { this[key] = btn.textContent; btn.textContent = label; btn.classList.add('bllmc-spinning'); }
       };
       if (busy && label) {
         if (/发送/.test(label)) { apply(publishBtn, '_publishLabel'); }
@@ -2034,8 +2034,9 @@
     #${APP.panelId} .bllmc-secondary{background:var(--bllmc-surface)!important;border-color:var(--bllmc-border-strong)!important}
     #${APP.panelId} .bllmc-open{display:inline-block;margin-top:7px;padding:6px 10px;border-radius:var(--bllmc-radius-sm);text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
     #${APP.panelId} .bllmc-open:hover{transform:translateY(-1px);box-shadow:0 6px 14px rgba(0,174,236,.26)}
-    #${APP.panelId}.bllmc-busy .bllmc-body button:disabled{padding-right:28px;pointer-events:none;opacity:.72}
-    #${APP.panelId}.bllmc-busy .bllmc-body button:disabled::after{content:"";position:absolute;right:9px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:bllmc-spin .75s linear infinite}
+    #${APP.panelId}.bllmc-busy .bllmc-body button:disabled{pointer-events:none;opacity:.5}
+    #${APP.panelId}.bllmc-busy .bllmc-body button.bllmc-spinning{opacity:1;padding-right:28px}
+    #${APP.panelId}.bllmc-busy .bllmc-body button.bllmc-spinning::after{content:"";position:absolute;right:9px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:bllmc-spin .75s linear infinite}
 
     /* Status + retry */
     #${APP.panelId} .bllmc-topline{display:flex;align-items:center;gap:8px}

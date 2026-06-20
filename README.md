@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.8.0-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.8.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主、分区、时长、标签、CC 字幕以及页面中已加载的高赞评论与置顶评论，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。CC 字幕作为视频实际内容的直接来源（主锚点），标签、分区和置顶/高赞评论作为辅助参考素材，共同提升生成评论与视频的相关性。无 CC 字幕时自动回退到标签+评论逻辑。
 
@@ -61,7 +61,7 @@
 
 - 用户主动勾选“自动发布”。
 - 当前视频没有已处理记录。
-- 距离上次发布至少 10 分钟。
+- 距离上次发布至少 30 秒。
 - 本次脚本运行尚未发布评论。
 - 当天发布数少于设置中的“每日自动评论上限”。
 - 登录状态可确认，页面没有验证码或风险提示。
@@ -113,6 +113,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.8.1 (2026-06-20)：自动发布间隔从 10 分钟降至 30 秒；修复 busy 状态下所有按钮同时显示转圈动画的问题，改为仅当前操作按钮显示转圈，其余按钮仅降低透明度。
 - v0.8.0 (2026-06-20)：UI 面板重构。移除“检查视频”按钮，改为打开面板/切换视频时自动提取视频信息，视频信息区保留“↻”小图标供手动重新提取；移除“测试”复选框和动态按钮文案逻辑，改为两个显式按钮——“填入评论框”（仅填入不发送）和“发送评论”（填入并直接发送），用户按需选择，无需理解“测试模式”概念；移除视频标签 chips 展示（标签仍会抓取并发送给 AI，但 UI 不再逐个显示，改为在元信息行显示“N 标签”计数）；视频信息卡片由多行 chips 改为单行“·”分隔的紧凑元信息行；简化模式栏为“自动发布”复选框 + 今日配额；`Publisher.publish` 新增 `send` 参数替代原 `config.testMode` 判断，`Controller.publish` 默认 `send = isAutomatic`。
 - v0.7.1 (2026-06-19)：UI 体验改进。视频信息卡片补全分区、时长、标签 chips 和字幕状态徽章（有字幕显示字符数，无字幕提示回退）；设置弹窗加 dirty 跟踪，有未保存改动时点遮罩/ESC/取消会二次确认，避免误关丢草稿；主操作按钮（检查/生成/发布）执行中显示“正在检查…/正在生成…/正在发布…”进行中文案，结束后恢复原文案。
 - v0.7.0 (2026-06-19)：新增 CC 字幕作为视频内容主锚点。通过 `player/v2` 接口抓取 CC 字幕（优先中文简繁体），压缩处理后（提取 content、合并断句、过滤语气词、句间换行、限长 2000 字保留首尾）作为视频实际内容发给 AI，使 AI 从“靠标题+评论间接推断”升级为“直接看到视频讲了什么”，相关性显著提升。无 CC 字幕时自动回退到 v0.6.9 的标签+评论逻辑。`getAid` 升级为 `getAidAndCid` 同步取 cid，`buildUserPrompt` 优先用字幕，`SYSTEM_PROMPT` 第 3 条说明字幕为最主要依据，检查日志补充字幕字符数。
