@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.7.1
+// @version      0.8.0
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.7.1',
+    version: '0.8.0',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -1006,7 +1006,7 @@
       const comment = Util.normalizeText(text);
       if (comment.length < 2 || comment.length > 1000) throw new Error('评论为空或长度超出 B 站常规限制。');
       if (isAutomatic) {
-        if (!config.autoPublish || config.testMode) throw new Error('自动发布要求开启自动发布并关闭测试模式。');
+        if (!config.autoPublish) throw new Error('自动发布要求开启自动发布。');
         if (this.sessionPublishCount >= 1) throw new Error('本次脚本运行已经发布过 1 条，已停止。');
         const stats = Store.getPublishStats();
         if (stats.count >= config.dailyAutoPublishLimit) {
@@ -1088,14 +1088,14 @@
       }
       return null;
     },
-    async publish(video, text, config, isAutomatic = false) {
+    async publish(video, text, config, isAutomatic = false, send = false) {
       const comment = this.validate(video, text, config, isAutomatic);
       const prevScroll = this.captureScroll();
       try {
         const editor = await this.findEditor();
         this.fillEditor(editor, comment);
         this.restoreScroll(prevScroll);
-        if (config.testMode) return { mode: 'test', message: '测试模式：已填入评论框，未点击发送。' };
+        if (!send) return { mode: 'test', message: '已填入评论框，未点击发送。' };
         if (Page.hasRiskPrompt()) throw new Error('发送前检测到验证码或风险提示，已停止。');
         const sendButton = await this.waitForSendButton(editor);
         if (!sendButton) throw new Error('未找到评论发送按钮，页面结构可能已变化。评论已保留在输入框中。');
@@ -1190,23 +1190,25 @@
               <span data-role="status">就绪</span>
               <button data-action="retry" type="button" class="bllmc-retry" hidden>重试</button>
             </div>
-            <button data-action="check" class="bllmc-secondary">检查视频</button>
           </div>
+          <section class="bllmc-section">
+            <div class="bllmc-section-head"><h3>视频信息</h3><button data-action="refresh" type="button" class="bllmc-refresh-btn" title="重新提取">↻</button></div>
+            <div data-role="video" class="bllmc-muted">正在提取…</div>
+          </section>
           <div class="bllmc-modebar">
-            <div class="bllmc-mode-copy">
-              <div data-role="modeHint" class="bllmc-mode-hint"></div>
-              <div data-role="quota" class="bllmc-quota"></div>
-            </div>
-            <div class="bllmc-switches">
-              <label><input data-field="testMode" type="checkbox"> 测试</label>
-              <label><input data-field="autoPublish" type="checkbox"> 自动发布</label>
-            </div>
+            <label><input data-field="autoPublish" type="checkbox"> 自动发布</label>
+            <div data-role="quota" class="bllmc-quota"></div>
           </div>
-          <section class="bllmc-section"><div class="bllmc-section-head"><h3>视频信息</h3></div><div data-role="video" class="bllmc-muted">尚未检查</div></section>
           <section class="bllmc-section bllmc-comment-section">
             <div class="bllmc-section-head"><h3>评论草稿</h3><span data-role="counter" class="bllmc-counter">0/100</span></div>
             <textarea data-field="comment" rows="4" placeholder="生成后可在此编辑"></textarea>
-            <div class="bllmc-actions"><button data-action="generate" class="bllmc-secondary">生成评论</button><button data-action="publish" data-role="publishButton" class="bllmc-primary">填入评论框</button></div>
+            <div class="bllmc-actions">
+              <button data-action="generate" data-role="generateButton" class="bllmc-secondary bllmc-btn-generate">生成评论</button>
+              <div class="bllmc-publish-row">
+                <button data-action="fill" data-role="fillButton" class="bllmc-secondary">填入评论框</button>
+                <button data-action="publish" data-role="publishButton" class="bllmc-primary">发送评论</button>
+              </div>
+            </div>
           </section>
           <details data-role="logDetails" class="bllmc-details">
             <summary>运行日志</summary>
@@ -1249,6 +1251,7 @@
       const next = { ...this.state, fabMode: false, collapsed: false };
       this.controller.panelState = Store.setPanelState(next);
       this.controller.log(`面板已展开（v${APP.version}）。`);
+      this.controller.autoCheck();
     }
 
     collapseToFab() {
@@ -1313,14 +1316,17 @@
       panel.querySelector('[data-action="settings"]').addEventListener('click', () => {
         this.controller.openSettings();
       });
-      panel.querySelector('[data-action="check"]').addEventListener('click', () => {
-        this.controller.run(() => this.controller.check(), '正在检查…');
+      panel.querySelector('[data-action="refresh"]').addEventListener('click', () => {
+        this.controller.run(() => this.controller.check(), '正在提取…');
       });
       panel.querySelector('[data-action="generate"]').addEventListener('click', () => {
         this.controller.run(() => this.controller.generate(), '正在生成…');
       });
+      panel.querySelector('[data-action="fill"]').addEventListener('click', () => {
+        this.controller.run(() => this.controller.publish(false, false), '正在填入…');
+      });
       panel.querySelector('[data-action="publish"]').addEventListener('click', () => {
-        this.controller.run(() => this.controller.publish(false), '正在发布…');
+        this.controller.run(() => this.controller.publish(false, true), '正在发送…');
       });
       panel.querySelector('[data-action="retry"]').addEventListener('click', () => {
         this.controller.retryLast();
@@ -1425,20 +1431,6 @@
     }
 
     updateModeUI() {
-      if (!this.elements.publishButton) return;
-      const testMode = this.elements.testMode.checked;
-      const autoPublish = this.elements.autoPublish.checked;
-      this.elements.publishButton.textContent = testMode ? '填入评论框' : '立即发布';
-      if (testMode) {
-        this.elements.modeHint.textContent = autoPublish
-          ? '测试：只填入，自动发布暂停。'
-          : '测试：只填入，不发送。';
-      } else {
-        this.elements.modeHint.textContent = autoPublish
-          ? '实发：生成后直接发布。'
-          : '实发：点击后直接发送。';
-      }
-      this.elements.modeHint.classList.toggle('bllmc-live-mode', !testMode);
       this.updateQuotaUI();
     }
 
@@ -1453,9 +1445,8 @@
       this.panel.classList.toggle('bllmc-busy', busy);
       const buttons = Array.from(this.panel.querySelectorAll('.bllmc-body button'));
       buttons.forEach((button) => { button.disabled = busy; });
-      // 触发操作的主按钮在 busy 时显示进行中文案，让用户明确知道当前在干什么。
-      // 三个主操作按钮按 label 匹配：哪个按钮当前可见且非重试/日志按钮，就更新哪个。
-      const primaryBtn = this.elements.generate;
+      const generateBtn = this.elements.generateButton;
+      const fillBtn = this.elements.fillButton;
       const publishBtn = this.elements.publishButton;
       const restore = (btn, key) => {
         if (btn && this[key] != null) { btn.textContent = this[key]; this[key] = null; }
@@ -1464,12 +1455,12 @@
         if (btn && busy && label) { this[key] = btn.textContent; btn.textContent = label; }
       };
       if (busy && label) {
-        // generate 和 publish 都可能被触发；只改当前操作对应的按钮。
-        // 通过 label 关键词判断：检查/生成 -> generate 按钮；发布 -> publish 按钮。
-        if (/发布/.test(label)) { apply(publishBtn, '_publishLabel'); }
-        else { apply(primaryBtn, '_generateLabel'); }
+        if (/发送/.test(label)) { apply(publishBtn, '_publishLabel'); }
+        else if (/填入/.test(label)) { apply(fillBtn, '_fillLabel'); }
+        else { apply(generateBtn, '_generateLabel'); }
       } else {
-        restore(primaryBtn, '_generateLabel');
+        restore(generateBtn, '_generateLabel');
+        restore(fillBtn, '_fillLabel');
         restore(publishBtn, '_publishLabel');
       }
     }
@@ -1494,36 +1485,28 @@
 
     renderVideo(video) {
       if (!this.elements.video) return;
-      const metaChips = [];
-      metaChips.push(`<span class="bllmc-tag">${Util.escapeHtml(video.uploader)}</span>`);
-      metaChips.push(`<span class="bllmc-tag">${Util.escapeHtml(video.bvid)}</span>`);
-      if (video.tname) metaChips.push(`<span class="bllmc-tag">分区：${Util.escapeHtml(video.tname)}</span>`);
+      const parts = [];
+      parts.push(Util.escapeHtml(video.uploader));
+      parts.push(Util.escapeHtml(video.bvid));
+      if (video.tname) parts.push(Util.escapeHtml(video.tname));
       if (video.duration) {
         const mins = Math.floor(video.duration / 60);
         const secs = video.duration % 60;
-        metaChips.push(`<span class="bllmc-tag">时长 ${mins}:${String(secs).padStart(2, '0')}</span>`);
+        parts.push(`${mins}:${String(secs).padStart(2, '0')}`);
       }
-      // 字幕状态：有字幕用 success 色突出，无字幕用 warn 色提示回退。
-      if (video.hasSubtitle) {
-        metaChips.push(`<span class="bllmc-badge bllmc-badge-success">字幕 ${video.subtitle.length} 字</span>`);
-      } else {
-        metaChips.push(`<span class="bllmc-badge bllmc-badge-warn">无 CC 字幕</span>`);
-      }
-      metaChips.push(`<span class="bllmc-badge">${video.comments.length} 条评论</span>`);
-      if (video.topComments?.length) metaChips.push(`<span class="bllmc-tag">置顶 ${video.topComments.length}</span>`);
-      // 标签单独一行，避免与 meta chips 混挤。
-      const tagLine = video.tags?.length
-        ? `<div class="bllmc-video-tags">${video.tags.slice(0, 12).map((t) => `<span class="bllmc-tag">${Util.escapeHtml(t)}</span>`).join('')}</div>`
-        : '';
+      parts.push(video.hasSubtitle ? `字幕 ${video.subtitle.length} 字` : '无字幕');
+      parts.push(`${video.comments.length} 条评论`);
+      if (video.topComments?.length) parts.push(`${video.topComments.length} 置顶`);
+      if (video.tags?.length) parts.push(`${video.tags.length} 标签`);
       this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
-        <div class="bllmc-video-meta">${metaChips.join('')}</div>${tagLine}
+        <div class="bllmc-video-meta-line">${parts.join(' · ')}</div>
         <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
     }
 
     renderDiscovery(video) {
       if (!this.elements.video) return;
-      this.elements.video.innerHTML = `<strong>${Util.escapeHtml(video.title)}</strong>
-        <div>${Util.escapeHtml(video.uploader || 'UP 主待进入视频页识别')} · ${Util.escapeHtml(video.bvid)}</div>
+      this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
+        <div class="bllmc-video-meta-line">${Util.escapeHtml(video.uploader || 'UP 主待进入视频页识别')} · ${Util.escapeHtml(video.bvid)}</div>
         <a class="bllmc-open" href="${Util.escapeHtml(video.url)}">打开视频并继续</a>`;
     }
 
@@ -1741,6 +1724,14 @@
       this.bindRouteObserver();
       this.log(`脚本 v${APP.version} 已加载。`);
       this.setStatus(pageType === 'video' ? '当前视频模式' : pageType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
+      if (pageType === 'video') this.autoCheck();
+    }
+
+    autoCheck() {
+      if (this.busy) return;
+      if (Page.isVideoPage() || Page.isDiscoveryPage()) {
+        this.run(() => this.check(), '正在提取…');
+      }
     }
 
     bindRouteObserver() {
@@ -1755,7 +1746,7 @@
           const nextType = Page.pageType();
           this.currentVideo = null;
           this.view.clearComment();
-          this.view.setVideoPlaceholder('页面已切换，请重新检查');
+          this.view.setVideoPlaceholder('页面已切换，正在重新提取…');
           this.setStatus('检测到 SPA 页面切换');
           this.log('URL 已变化，已清除当前视频上下文。');
           // 若页面类型变化，重新挂载。
@@ -1767,6 +1758,7 @@
             this.setStatus(nextType === 'video' ? '当前视频模式'
               : nextType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
           }
+          if (nextType === 'video') this.autoCheck();
         }, APP.routeDebounceMs);
       });
       this._mountedType = Page.pageType();
@@ -1794,10 +1786,9 @@
       this.config = Store.setConfig({
         ...this.config,
         autoPublish: this.view.elements.autoPublish.checked,
-        testMode: this.view.elements.testMode.checked,
       });
       if (field === 'autoPublish' && this.config.autoPublish && !previous.autoPublish) {
-        this.log('自动发布已开启；仅在关闭测试模式后生效。', 'warn');
+        this.log('自动发布已开启；生成评论后将自动发送。', 'warn');
       }
       this.view.updateModeUI();
     }
@@ -1924,18 +1915,18 @@
       this.view.setComment(comment);
       this.setStatus('评论已生成，可编辑');
       this.log(`生成完成，共 ${comment.length} 字。`);
-      if (this.config.autoPublish && !this.config.testMode) {
-        this.log('满足自动发布开关条件，正在执行限频检查。', 'warn');
-        await this.publish(true);
+      if (this.config.autoPublish) {
+        this.log('自动发布已开启，正在执行限频检查。', 'warn');
+        await this.publish(true, true);
       }
     }
 
-    async publish(isAutomatic) {
+    async publish(isAutomatic, send = isAutomatic) {
       this.config = Store.getConfig();
       if (!this.currentVideo) throw new Error('请先在当前视频页检查视频信息。');
       const text = this.view.elements.comment.value;
-      this.setStatus(this.config.testMode ? '正在填入评论框…' : '正在准备发布…');
-      const result = await Publisher.publish(this.currentVideo, text, this.config, isAutomatic);
+      this.setStatus(send ? '正在发送评论…' : '正在填入评论框…');
+      const result = await Publisher.publish(this.currentVideo, text, this.config, isAutomatic, send);
       this.setStatus(result.message);
       this.log(result.message, result.mode === 'published' ? 'success' : 'info');
       this.view.updateQuotaUI();
@@ -2047,24 +2038,21 @@
     #${APP.panelId}.bllmc-busy .bllmc-body button:disabled::after{content:"";position:absolute;right:9px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:bllmc-spin .75s linear infinite}
 
     /* Status + retry */
-    #${APP.panelId} .bllmc-topline{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
-    #${APP.panelId} .bllmc-status-wrap{display:flex;align-items:center;gap:8px;min-width:0}
+    #${APP.panelId} .bllmc-topline{display:flex;align-items:center;gap:8px}
+    #${APP.panelId} .bllmc-status-wrap{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
     #${APP.panelId} .bllmc-topline [data-role="status"]{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-sm);background:var(--bllmc-surface-2);color:var(--bllmc-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #${APP.panelId} .bllmc-retry{padding:5px 9px;font-size:11px;border-color:var(--bllmc-error);color:var(--bllmc-error);background:var(--bllmc-bg)}
     #${APP.panelId} .bllmc-retry[hidden]{display:none}
-    #${APP.panelId} .bllmc-actions{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:8px}
-    #${APP.panelId} .bllmc-actions .bllmc-primary{min-width:92px}
+    #${APP.panelId} .bllmc-actions{display:grid;gap:8px;margin-top:8px}
+    #${APP.panelId} .bllmc-btn-generate{width:100%}
+    #${APP.panelId} .bllmc-publish-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    #${APP.panelId} .bllmc-publish-row .bllmc-primary{min-width:0}
     #${APP.panelId}.bllmc-busy{cursor:progress}
     #${APP.panelId}.bllmc-busy [data-role="status"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--bllmc-primary);animation:bllmc-pulse 1s ease-in-out infinite;vertical-align:1px}
     #${APP.panelId} label{display:block;color:var(--bllmc-muted)}
-    #${APP.panelId} .bllmc-modebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin:9px 0 0;padding:9px 10px;background:var(--bllmc-surface);border:1px solid var(--bllmc-border);border-radius:7px}
-    #${APP.panelId} .bllmc-mode-copy{min-width:0}
-    #${APP.panelId} .bllmc-switches{display:grid;gap:4px;margin:0}
-    #${APP.panelId} .bllmc-switches label{display:inline-flex;align-items:center;gap:5px;color:var(--bllmc-fg);white-space:nowrap}
-    #${APP.panelId} .bllmc-mode-hint,#${APP.panelId} .bllmc-quota{font-size:11px;color:var(--bllmc-muted)}
-    #${APP.panelId} .bllmc-mode-hint{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #${APP.panelId} .bllmc-quota{margin-top:2px;color:var(--bllmc-faint)}
-    #${APP.panelId} .bllmc-live-mode{color:var(--bllmc-error);font-weight:600}
+    #${APP.panelId} .bllmc-modebar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:9px 0 0;padding:9px 10px;background:var(--bllmc-surface);border:1px solid var(--bllmc-border);border-radius:7px}
+    #${APP.panelId} .bllmc-modebar label{display:inline-flex;align-items:center;gap:5px;color:var(--bllmc-fg);white-space:nowrap;margin:0}
+    #${APP.panelId} .bllmc-quota{font-size:11px;color:var(--bllmc-faint)}
     #${APP.panelId} .bllmc-warning,.bllmc-settings-dialog .bllmc-warning{padding:9px 10px;background:var(--bllmc-warn-bg);color:var(--bllmc-warn-fg);border:1px solid var(--bllmc-warn-border);border-radius:var(--bllmc-radius-sm)}
 
     /* 字数计数器 */
@@ -2074,14 +2062,11 @@
 
     /* Video summary */
     #${APP.panelId} [data-role="video"]{max-height:180px;overflow:auto;word-break:break-word}
-    #${APP.panelId} .bllmc-video-title{margin-bottom:7px;color:var(--bllmc-fg);font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    #${APP.panelId} .bllmc-video-meta{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
-    #${APP.panelId} .bllmc-video-tags{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
-    #${APP.panelId} .bllmc-video-tags .bllmc-tag{padding:2px 7px;font-size:10px}
-    #${APP.panelId} .bllmc-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 8px;border:1px solid var(--bllmc-border);border-radius:var(--bllmc-radius-pill);background:var(--bllmc-surface);color:var(--bllmc-muted);font-size:11px}
-    #${APP.panelId} .bllmc-badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:var(--bllmc-radius-pill);background:#e8f7ff;color:#0077a8;font-size:11px;font-weight:600}
-    #${APP.panelId} .bllmc-badge-success{background:#e6f5ec;color:#18864b}
-    #${APP.panelId} .bllmc-badge-warn{background:var(--bllmc-warn-bg);color:var(--bllmc-warn-fg)}
+    #${APP.panelId} .bllmc-video-title{margin-bottom:5px;color:var(--bllmc-fg);font-size:13px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    #${APP.panelId} .bllmc-video-meta-line{margin:4px 0 5px;color:var(--bllmc-muted);font-size:11px;line-height:1.5;word-break:break-word}
+    #${APP.panelId} .bllmc-video-desc{color:var(--bllmc-muted);font-size:12px;line-height:1.45}
+    #${APP.panelId} .bllmc-refresh-btn{padding:2px 7px!important;font-size:13px;border-color:var(--bllmc-border)!important;background:transparent!important;color:var(--bllmc-muted);line-height:1}
+    #${APP.panelId} .bllmc-refresh-btn:hover{color:var(--bllmc-primary);border-color:var(--bllmc-primary)!important}
 
     /* Logs */
     #${APP.panelId} .bllmc-details{margin-top:10px;border-top:1px solid var(--bllmc-border)}
@@ -2121,21 +2106,13 @@
     @keyframes bllmc-spin{to{transform:rotate(360deg)}}
     @keyframes bllmc-pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
 
-    /* Dark badge override (auto + manual) */
-    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge{background:#12384a;color:#7bd6ff}
-    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge-success{background:#1a3a28;color:#4eaf7a}
-    #${APP.panelId}[data-bllmc-theme="dark"] .bllmc-badge-warn{background:#3a3018;color:#f0ce7a}
-
     /* Narrow screens */
     @media(max-width:420px){
       #${APP.panelId}{right:8px;bottom:8px;width:calc(100vw - 16px)}
       #${APP.fabId}{right:14px;bottom:14px}
       .bllmc-settings-overlay{padding:10px}
       .bllmc-settings-row{grid-template-columns:1fr}
-      #${APP.panelId} .bllmc-topline{grid-template-columns:1fr}
       #${APP.panelId} .bllmc-topline [data-role="status"]{text-align:left;white-space:normal}
-      #${APP.panelId} .bllmc-modebar{grid-template-columns:1fr}
-      #${APP.panelId} .bllmc-switches{grid-template-columns:1fr 1fr}
     }
   `);
 
