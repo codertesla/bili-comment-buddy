@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.8.1
+// @version      0.8.2
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
@@ -30,7 +30,7 @@
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
     fabId: 'bllmc-fab',
-    version: '0.8.1',
+    version: '0.8.2',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -142,6 +142,17 @@
     loginButtons: ['.header-login-entry', '.login-entry', '[class*="login-entry"]'],
     loggedInAvatars: ['.header-avatar-wrap', '.v-popover-wrap .header-avatar', '.mini-avatar'],
     riskIndicators: ['.geetest_panel', '.geetest_holder', '[class*="captcha"]', '[class*="risk-control"]'],
+    riskPromptContainers: [
+      '[role="dialog"]',
+      '.bili-dialog',
+      '.bili-toast',
+      '.bili-message',
+      '.van-dialog',
+      '.van-toast',
+      '.van-message',
+      '[class*="captcha"]',
+      '[class*="risk-control"]',
+    ],
     closedCommentText: ['.comment-closed', '.no-comment', '.reply-restriction'],
     discoveryRoots: ['main', '#app', '.bili-dyn-list', '.space-main'],
   });
@@ -484,18 +495,34 @@
     // 风控检测结果缓存 800ms：发布流程前后会连续调用，避免重复 reflow 读取 innerText。
     _riskCacheAt: 0,
     _riskCacheValue: false,
+    isOwnUiElement(element) {
+      return Boolean(element?.closest?.(
+        `#${APP.panelId}, #${APP.fabId}, .bllmc-settings-overlay, .bllmc-settings-dialog`,
+      ));
+    },
+    isVisibleRiskElement(element) {
+      if (this.isOwnUiElement(element) || !Util.isVisible(element)) return false;
+      if (typeof element.checkVisibility !== 'function') return true;
+      return element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    },
     hasRiskPrompt() {
       const now = Date.now();
       if (now - this._riskCacheAt < 800) return this._riskCacheValue;
       this._riskCacheAt = now;
-      // 优先用 selector 检测（便宜），命中即短路；未命中再读 innerText（触发 reflow）。
-      const element = Util.findFirst(SELECTORS.riskIndicators);
-      if (element && element.offsetParent !== null) {
+      // 仅检查实际可见的验证码组件，避免页面中预挂载的隐藏节点触发误判。
+      const indicator = Util.findAllDeep(SELECTORS.riskIndicators)
+        .find((element) => this.isVisibleRiskElement(element));
+      if (indicator) {
         this._riskCacheValue = true;
         return true;
       }
-      const bodyText = Util.normalizeText(document.body?.innerText).slice(-3000);
-      this._riskCacheValue = /验证码|操作频繁|账号存在风险|风控验证/.test(bodyText);
+
+      // 文本检测限定在可见弹窗和 Toast 内，不能扫描 body：运行日志自身也包含
+      // “验证码或风险提示”，扫描全文会在首次报错后形成永久自触发。
+      const riskTextPattern = /验证码|操作频繁|账号存在风险|风控验证/;
+      this._riskCacheValue = Util.findAllDeep(SELECTORS.riskPromptContainers)
+        .some((element) => this.isVisibleRiskElement(element)
+          && riskTextPattern.test(Util.normalizeText(element.innerText || element.textContent)));
       return this._riskCacheValue;
     },
     loginState() {
