@@ -1,17 +1,13 @@
 // ==UserScript==
 // @name         B 站嘴替小助手
 // @namespace    https://github.com/codertesla/bili-comment-buddy
-// @version      0.8.2
+// @version      0.9.0
 // @description  调用 AI 根据当前 B 站视频内容生成一条可编辑的中文评论。
 // @author       codertesla
 // @license      MIT
 // @icon         https://www.bilibili.com/favicon.ico
 // @icon64       https://www.bilibili.com/favicon.ico
 // @match        https://www.bilibili.com/video/*
-// @match        https://www.bilibili.com/list/*
-// @match        https://t.bilibili.com/*
-// @match        https://space.bilibili.com/*/dynamic*
-// @match        https://space.bilibili.com/*/video*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -29,8 +25,7 @@
   const APP = Object.freeze({
     prefix: '[B 站嘴替小助手]',
     panelId: 'bllmc-panel',
-    fabId: 'bllmc-fab',
-    version: '0.8.2',
+    version: '0.9.0',
     requestTimeoutMs: 30000,
     requestRetries: 1,
     maxComments: 10,
@@ -81,8 +76,7 @@
   });
 
   const DEFAULT_PANEL_STATE = Object.freeze({
-    collapsed: false,
-    fabMode: false,
+    hidden: false,
     theme: 'light',
     right: 18,
     bottom: 18,
@@ -154,7 +148,6 @@
       '[class*="risk-control"]',
     ],
     closedCommentText: ['.comment-closed', '.no-comment', '.reply-restriction'],
-    discoveryRoots: ['main', '#app', '.bili-dyn-list', '.space-main'],
   });
 
   const Util = {
@@ -462,10 +455,17 @@
           && window.matchMedia('(prefers-color-scheme: dark)').matches;
         state.theme = prefersDark ? 'dark' : 'light';
       }
+      // 迁移：FAB 已移除，原 fabMode 不再需要（面板默认最小化取代其语义）。
+      // collapsed 不再持久化——每次加载默认以最小化（仅标题栏）形态出现。
+      delete state.fabMode;
+      delete state.collapsed;
       return { ...DEFAULT_PANEL_STATE, ...state };
     },
     setPanelState(state) {
       const safe = { ...DEFAULT_PANEL_STATE, ...state };
+      // 同步清理已废弃字段，避免旧值残留写入存储。
+      delete safe.fabMode;
+      delete safe.collapsed;
       GM_setValue(this.keys.panelState, safe);
       return safe;
     },
@@ -478,26 +478,18 @@
     isVideoPage() {
       return Boolean(this.getBvid());
     },
-    isDiscoveryPage() {
-      return location.hostname === 't.bilibili.com'
-        || /\/dynamic(?:\/|$)/.test(location.pathname)
-        || (/\/video(?:\/|$)/.test(location.pathname) && location.hostname === 'space.bilibili.com');
-    },
-    // 分级挂载核心：决定本页应该以何种形态出现。
-    // 'video'     -> 完整面板（默认展开）
-    // 'discovery' -> 仅 FAB（点击展开为完整面板）
-    // 'unsupported' -> 不挂载
+    // 挂载核心：决定本页应该以何种形态出现。
+    // 'video'       -> 显示浮动面板（默认最小化，仅标题栏）
+    // 'unsupported' -> 不挂载（@match 已限定仅在视频页运行）
     pageType() {
-      if (this.isVideoPage()) return 'video';
-      if (this.isDiscoveryPage()) return 'discovery';
-      return 'unsupported';
+      return this.isVideoPage() ? 'video' : 'unsupported';
     },
     // 风控检测结果缓存 800ms：发布流程前后会连续调用，避免重复 reflow 读取 innerText。
     _riskCacheAt: 0,
     _riskCacheValue: false,
     isOwnUiElement(element) {
       return Boolean(element?.closest?.(
-        `#${APP.panelId}, #${APP.fabId}, .bllmc-settings-overlay, .bllmc-settings-dialog`,
+        `#${APP.panelId}, .bllmc-settings-overlay, .bllmc-settings-dialog`,
       ));
     },
     isVisibleRiskElement(element) {
@@ -810,25 +802,6 @@
     },
   };
 
-  const Discovery = {
-    scanRenderedVideos() {
-      const root = Util.findFirst(SELECTORS.discoveryRoots) || document;
-      const links = Array.from(root.querySelectorAll('a[href*="/video/BV"]'));
-      const seen = new Set();
-      return links.map((link) => {
-        const absoluteUrl = new URL(link.href, location.origin);
-        const bvid = Page.getBvid(absoluteUrl.href);
-        const card = link.closest('article, [class*="card"], [class*="item"], [class*="dyn"]');
-        const title = Util.normalizeText(link.title || link.textContent || card?.querySelector('[title]')?.getAttribute('title'));
-        const uploader = Util.normalizeText(card?.querySelector('[class*="name"], [class*="author"]')?.textContent);
-        return { bvid, title: title || '页面未提供标题', uploader, url: `${absoluteUrl.origin}/video/${bvid}` };
-      }).filter((video) => video.bvid && !seen.has(video.bvid) && seen.add(video.bvid));
-    },
-    newestUnprocessed() {
-      return this.scanRenderedVideos().find((video) => !Store.isProcessed(video.bvid)) || null;
-    },
-  };
-
   const LLM = {
     endpoint(baseUrl) {
       const clean = String(baseUrl || '').trim().replace(/\/+$/, '');
@@ -958,10 +931,9 @@
     },
     isOwnPanelElement(element) {
       const panel = document.getElementById(APP.panelId);
-      const fab = document.getElementById(APP.fabId);
       let current = element;
       while (current) {
-        if (current === panel || current === fab) return true;
+        if (current === panel) return true;
         const root = current.getRootNode?.();
         current = root?.host || current.parentElement;
       }
@@ -1151,7 +1123,9 @@
       this.controller = controller;
       this.elements = {};
       this.panel = null;
-      this.fab = null;
+      // collapsed 为会话内内存状态：每次挂载默认最小化（仅标题栏），
+      // 不持久化——避免老的“默认展开”体验在用户未点击收起时一直保留。
+      this.collapsed = true;
       this._dragState = null;
     }
 
@@ -1159,42 +1133,22 @@
     get state() { return this.controller.panelState; }
 
     // 根据 pageType 决定挂载形态。
+    // hidden 优先级最高：用户主动隐藏后，仅能通过油猴菜单恢复。
     mount(pageType) {
       this.unmount();
       if (pageType === 'unsupported') return;
-      this.buildFab();
-      if (pageType === 'video' && !this.state.fabMode) {
-        this.buildPanel();
-        this.applyCollapsed(this.state.collapsed);
-      } else {
-        // 动态页或用户上次收起为 FAB：只显示 FAB。
-        this.showFab();
-      }
+      if (this.state.hidden) return;
+      this.collapsed = true;
+      this.buildPanel();
+      this.applyCollapsed(true);
       this.applyTheme(this.state.theme);
       this.applyPosition(this.state.right, this.state.bottom);
     }
 
     unmount() {
       this.panel?.remove();
-      this.fab?.remove();
       this.panel = null;
-      this.fab = null;
       this.elements = {};
-    }
-
-    buildFab() {
-      // 防御性清理：若 DOM 残留旧 FAB（理论上 unmount 已 remove），先移除避免重复 ID 与重复绑定。
-      document.getElementById(APP.fabId)?.remove();
-      const fab = document.createElement('button');
-      fab.id = APP.fabId;
-      fab.type = 'button';
-      fab.title = 'B 站嘴替小助手';
-      fab.setAttribute('aria-label', '打开 B 站嘴替小助手');
-      fab.innerHTML = '<span class="bllmc-fab-icon">嘴</span>';
-      document.body.appendChild(fab);
-      this.fab = fab;
-      // click 绑定统一在此处，避免与 bindGlobal 重复绑定导致 expandFromFab 跑两次。
-      fab.addEventListener('click', () => this.expandFromFab());
     }
 
     buildPanel() {
@@ -1209,6 +1163,7 @@
           <div class="bllmc-header-tools">
             <button data-action="theme" type="button" title="切换主题" aria-label="切换主题">◐</button>
             <button data-action="settings" type="button" title="设置">设置</button>
+            <button data-action="hide" type="button" title="隐藏面板（可通过油猴菜单恢复）" aria-label="隐藏面板">×</button>
           </div>
         </div>
         <div class="bllmc-body">
@@ -1258,37 +1213,9 @@
       panel.querySelectorAll('[data-field]').forEach((el) => { this.elements[el.dataset.field] = el; });
     }
 
-    showFab() {
-      this.panel?.remove();
-      this.panel = null;
-      this.elements = {};
-      if (this.fab) this.fab.hidden = false;
-      const next = { ...this.state, fabMode: true };
-      this.controller.panelState = Store.setPanelState(next);
-    }
-
-    expandFromFab() {
-      // buildPanel() 内部已调用 bindPanel()，切勿重复绑定，否则按钮事件会触发两次相互抵消。
-      this.buildPanel();
-      this.applyCollapsed(false);
-      this.applyTheme(this.state.theme);
-      this.applyPosition(this.state.right, this.state.bottom);
-      this.controller.refreshFromState();
-      if (this.fab) this.fab.hidden = true;
-      const next = { ...this.state, fabMode: false, collapsed: false };
-      this.controller.panelState = Store.setPanelState(next);
-      this.controller.log(`面板已展开（v${APP.version}）。`);
-      this.controller.autoCheck();
-    }
-
-    collapseToFab() {
-      this.showFab();
-      this.controller.panelState = Store.setPanelState({ ...this.state, fabMode: true, collapsed: false });
-      this.controller.log('面板已收起为悬浮按钮。');
-    }
-
     applyCollapsed(collapsed) {
       if (!this.panel) return;
+      this.collapsed = collapsed;
       const body = this.panel.querySelector('.bllmc-body');
       const btn = this.panel.querySelector('[data-action="collapse"]');
       const icon = this.panel.querySelector('.bllmc-collapse');
@@ -1300,7 +1227,6 @@
     applyTheme(theme) {
       const resolved = theme === 'dark' ? 'dark' : 'light';
       this.panel?.setAttribute('data-bllmc-theme', resolved);
-      this.fab?.setAttribute('data-bllmc-theme', resolved);
     }
 
     applyPosition(right, bottom) {
@@ -1309,10 +1235,6 @@
       const b = Math.max(0, Number(bottom) || 0);
       this.panel.style.right = `${r}px`;
       this.panel.style.bottom = `${b}px`;
-      if (this.fab) {
-        this.fab.style.right = `${r}px`;
-        this.fab.style.bottom = `${b}px`;
-      }
     }
 
     bindPanel() {
@@ -1325,11 +1247,8 @@
           this._suppressNextClick = false;
           return;
         }
-        const body = panel.querySelector('.bllmc-body');
-        const collapsed = body.classList.toggle('bllmc-body-collapsed');
-        event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
-        panel.querySelector('.bllmc-collapse').textContent = collapsed ? '+' : '−';
-        this.controller.panelState = Store.setPanelState({ ...this.state, collapsed });
+        this.applyCollapsed(!this.collapsed);
+        event.currentTarget.setAttribute('aria-expanded', String(!this.collapsed));
       });
 
       panel.querySelector('[data-action="theme"]').addEventListener('click', () => {
@@ -1342,6 +1261,9 @@
 
       panel.querySelector('[data-action="settings"]').addEventListener('click', () => {
         this.controller.openSettings();
+      });
+      panel.querySelector('[data-action="hide"]').addEventListener('click', () => {
+        this.controller.hidePanel();
       });
       panel.querySelector('[data-action="refresh"]').addEventListener('click', () => {
         this.controller.run(() => this.controller.check(), '正在提取…');
@@ -1528,13 +1450,6 @@
       this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
         <div class="bllmc-video-meta-line">${parts.join(' · ')}</div>
         <div class="bllmc-video-desc">${Util.escapeHtml(video.description || '暂无简介')}</div>`;
-    }
-
-    renderDiscovery(video) {
-      if (!this.elements.video) return;
-      this.elements.video.innerHTML = `<div class="bllmc-video-title">${Util.escapeHtml(video.title)}</div>
-        <div class="bllmc-video-meta-line">${Util.escapeHtml(video.uploader || 'UP 主待进入视频页识别')} · ${Util.escapeHtml(video.bvid)}</div>
-        <a class="bllmc-open" href="${Util.escapeHtml(video.url)}">打开视频并继续</a>`;
     }
 
     setVideoPlaceholder(text) {
@@ -1750,13 +1665,13 @@
       this.view.updateModeUI();
       this.bindRouteObserver();
       this.log(`脚本 v${APP.version} 已加载。`);
-      this.setStatus(pageType === 'video' ? '当前视频模式' : pageType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
-      if (pageType === 'video') this.autoCheck();
+      this.setStatus('当前视频模式');
+      if (pageType === 'video' && !this.panelState.hidden) this.autoCheck();
     }
 
     autoCheck() {
       if (this.busy) return;
-      if (Page.isVideoPage() || Page.isDiscoveryPage()) {
+      if (Page.isVideoPage()) {
         this.run(() => this.check(), '正在提取…');
       }
     }
@@ -1769,23 +1684,22 @@
         window.clearTimeout(this._routeTimer);
         this._routeTimer = window.setTimeout(() => {
           Util.invalidateShadowCache();
-          // 页面类型可能变化（如动态页点进视频页），重新分级挂载。
+          // 页面类型可能变化（如从视频页 SPA 跳走），重新判定挂载形态。
           const nextType = Page.pageType();
           this.currentVideo = null;
           this.view.clearComment();
           this.view.setVideoPlaceholder('页面已切换，正在重新提取…');
           this.setStatus('检测到 SPA 页面切换');
           this.log('URL 已变化，已清除当前视频上下文。');
-          // 若页面类型变化，重新挂载。
+          // 若页面类型变化，重新挂载（hidden 状态在 mount 内自行判定）。
           if (nextType !== this._mountedType) {
             this.view.mount(nextType);
             this.view.loadConfigIntoForm();
             this.view.updateModeUI();
             this._mountedType = nextType;
-            this.setStatus(nextType === 'video' ? '当前视频模式'
-              : nextType === 'discovery' ? '动态页发现模式（已收起）' : '等待支持的页面');
+            this.setStatus(nextType === 'video' ? '当前视频模式' : '等待支持的页面');
           }
-          if (nextType === 'video') this.autoCheck();
+          if (nextType === 'video' && !this.panelState.hidden) this.autoCheck();
         }, APP.routeDebounceMs);
       });
       this._mountedType = Page.pageType();
@@ -1822,6 +1736,30 @@
 
     openSettings() {
       this.settings.open();
+    }
+
+    // 彻底隐藏浮动面板（含 FAB 已移除，不再有任何角标）。
+    // 恢复只能通过油猴菜单“显示浮动面板”触发——这是用户主动选择的“勿扰”状态。
+    hidePanel() {
+      if (this.panelState.hidden) return;
+      this.panelState = Store.setPanelState({ ...this.panelState, hidden: true });
+      this.view.unmount();
+      this.log('面板已隐藏，可通过油猴菜单“显示浮动面板”恢复。', 'warn');
+    }
+
+    showPanel() {
+      if (!this.panelState.hidden) return;
+      this.panelState = Store.setPanelState({ ...this.panelState, hidden: false });
+      const pageType = Page.pageType();
+      if (pageType === 'unsupported') {
+        this.log('当前页面不在支持范围内，无法显示面板。', 'warn');
+        return;
+      }
+      this.view.mount(pageType);
+      this.view.loadConfigIntoForm();
+      this.view.updateModeUI();
+      this.log('面板已恢复显示。');
+      if (pageType === 'video') this.autoCheck();
     }
 
     setStatus(text, isError = false) {
@@ -1914,17 +1852,7 @@
         if (Store.isProcessed(video.bvid)) this.log('该 BV 号已有处理记录，不会重复发布。', 'warn');
         return;
       }
-      if (Page.isDiscoveryPage()) {
-        this.setStatus('正在扫描当前页面…');
-        const video = Discovery.newestUnprocessed();
-        if (!video) throw new Error('当前已渲染区域未发现未处理的视频链接；可向下滚动加载更多后重试。');
-        this.currentVideo = null;
-        this.view.renderDiscovery(video);
-        this.setStatus(`发现 ${video.bvid}`);
-        this.log('发现功能仅扫描当前页面已渲染内容；打开视频后才能提取简介和评论。');
-        return;
-      }
-      throw new Error('此页面不支持视频识别或动态发现。');
+      throw new Error('此页面不支持视频识别。');
     }
 
     async generate() {
@@ -1960,10 +1888,10 @@
     }
   }
 
-  // ============== 样式：CSS 变量化 + FAB + 暗色手动切换 + 字数计数 + 拖动 ==============
+  // ============== 样式：CSS 变量化 + 暗色手动切换 + 字数计数 + 拖动 ==============
   GM_addStyle(`
     /* ===== 设计 Token（亮色默认） ===== */
-    #${APP.panelId}, #${APP.fabId}, .bllmc-settings-overlay, .bllmc-settings-dialog {
+    #${APP.panelId}, .bllmc-settings-overlay, .bllmc-settings-dialog {
       --bllmc-bg: #ffffff;
       --bllmc-fg: #18191c;
       --bllmc-muted: #61666d;
@@ -1982,7 +1910,6 @@
       --bllmc-warn-fg: #805b10;
       --bllmc-warn-border: rgba(221,154,0,.22);
       --bllmc-shadow: 0 18px 46px rgba(15,23,42,.18);
-      --bllmc-shadow-fab: 0 6px 18px rgba(15,23,42,.22);
       --bllmc-radius: 8px;
       --bllmc-radius-sm: 6px;
       --bllmc-radius-pill: 999px;
@@ -1991,7 +1918,7 @@
     }
 
     /* 暗色主题：手动切换为 dark 时覆盖设计 Token */
-    #${APP.panelId}[data-bllmc-theme="dark"], #${APP.fabId}[data-bllmc-theme="dark"],
+    #${APP.panelId}[data-bllmc-theme="dark"],
     .bllmc-settings-overlay[data-bllmc-theme="dark"], .bllmc-settings-dialog[data-bllmc-theme="dark"] {
       --bllmc-bg: #202124;
       --bllmc-fg: #f1f2f3;
@@ -2011,14 +1938,7 @@
       --bllmc-warn-fg: #f0ce7a;
       --bllmc-warn-border: rgba(240,206,122,.25);
       --bllmc-shadow: 0 18px 46px rgba(0,0,0,.5);
-      --bllmc-shadow-fab: 0 6px 18px rgba(0,0,0,.5);
     }
-
-    /* ===== FAB 悬浮按钮（低调单色，仅 hover 时轻强调） ===== */
-    #${APP.fabId}{position:fixed;width:44px;height:44px;border:1px solid var(--bllmc-border-strong);border-radius:50%;background:var(--bllmc-surface);color:var(--bllmc-muted);box-shadow:var(--bllmc-shadow-fab);cursor:pointer;font:600 15px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;z-index:2147483646;transition:transform .12s ease,box-shadow .12s ease,color .12s ease,border-color .12s ease}
-    #${APP.fabId}:hover{transform:translateY(-1px) scale(1.03);border-color:var(--bllmc-primary);color:var(--bllmc-primary);box-shadow:0 8px 18px rgba(15,23,42,.2)}
-    #${APP.fabId}:active{transform:translateY(0) scale(.97)}
-    #${APP.fabId} .bllmc-fab-icon{pointer-events:none}
 
     /* ===== Panel shell ===== */
     #${APP.panelId}{position:fixed;right:18px;bottom:18px;width:320px;max-height:calc(100vh - 36px);z-index:2147483646;overflow:auto;background:var(--bllmc-bg);color:var(--bllmc-fg);border:1px solid var(--bllmc-border-strong);border-radius:var(--bllmc-radius);box-shadow:var(--bllmc-shadow);font:var(--bllmc-font)}
@@ -2040,6 +1960,8 @@
     #${APP.panelId} .bllmc-header-tools button{min-width:38px;padding:0 9px;font-size:12px;border-left:1px solid var(--bllmc-border)!important;background:transparent!important;color:var(--bllmc-muted);display:flex;align-items:center;justify-content:center}
     #${APP.panelId} .bllmc-header-tools button:hover{background:var(--bllmc-surface-2)!important;color:var(--bllmc-fg)}
     #${APP.panelId} .bllmc-header-tools [data-action="theme"]{font-size:14px}
+    #${APP.panelId} .bllmc-header-tools [data-action="hide"]{font-size:16px;line-height:1}
+    #${APP.panelId} .bllmc-header-tools [data-action="hide"]:hover{color:var(--bllmc-error)!important}
 
     /* Body and sections */
     #${APP.panelId} .bllmc-body{max-height:calc(100vh - 64px);overflow:hidden;padding:12px;opacity:1;transition:max-height .24s ease,padding .24s ease,opacity .18s ease}
@@ -2137,7 +2059,6 @@
     /* Narrow screens */
     @media(max-width:420px){
       #${APP.panelId}{right:8px;bottom:8px;width:calc(100vw - 16px)}
-      #${APP.fabId}{right:14px;bottom:14px}
       .bllmc-settings-overlay{padding:10px}
       .bllmc-settings-row{grid-template-columns:1fr}
       #${APP.panelId} .bllmc-topline [data-role="status"]{text-align:left;white-space:normal}
@@ -2147,8 +2068,6 @@
   const controller = new Controller();
   controller.init();
   GM_registerMenuCommand('打开 B 站嘴替小助手设置', () => controller.openSettings());
-  GM_registerMenuCommand('切换面板/FAB', () => {
-    if (controller.panelState.fabMode) controller.view.expandFromFab();
-    else controller.view.collapseToFab();
-  });
+  GM_registerMenuCommand('显示浮动面板', () => controller.showPanel());
+  GM_registerMenuCommand('隐藏浮动面板', () => controller.hidePanel());
 })();

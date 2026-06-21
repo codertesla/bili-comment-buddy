@@ -3,7 +3,7 @@
 [![安装脚本](https://img.shields.io/greasyfork/v/583255?style=for-the-badge&label=%E5%AE%89%E8%A3%85%E8%84%9A%E6%9C%AC&logo=tampermonkey&color=red)](https://greasyfork.org/scripts/583255)
 [![GitHub](https://img.shields.io/badge/GitHub-仓库-blue.svg?style=for-the-badge&logo=github)](https://github.com/codertesla/bili-comment-buddy)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.8.1-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
+[![Version](https://img.shields.io/badge/Version-v0.9.0-fb7299.svg?style=for-the-badge)](https://github.com/codertesla/bili-comment-buddy/blob/main/bilibili-llm-comment.user.js)
 
 一个调用 AI 自动给 B 站视频生成一条评论内容的 Tampermonkey 脚本。它会提取当前视频标题、简介、UP 主、分区、时长、标签、CC 字幕以及页面中已加载的高赞评论与置顶评论，再通过 OpenAI-compatible Chat Completions API 生成一条可编辑的中文评论。CC 字幕作为视频实际内容的直接来源（主锚点），标签、分区和置顶/高赞评论作为辅助参考素材，共同提升生成评论与视频的相关性。无 CC 字幕时自动回退到标签+评论逻辑。
 
@@ -17,8 +17,8 @@
 - 可编辑结果：生成内容会先进入面板文本框，可修改后再填入 B 站评论框。
 - 分级发布操作：点击"填入评论框"仅填入文本不发送（安全预览），点击"发送评论"填入并直接发送。
 - 自动发布限频：支持每日自动评论上限、10 分钟间隔、本次运行最多 1 条等保护。
-- 动态页发现：可在动态页、空间动态页、空间视频页扫描当前已渲染的视频链接。
-- 亮色/暗色适配：浮动面板和设置弹窗会跟随系统主题。
+- 低调浮动面板：默认以最小化形态（仅标题栏）出现在右下角，点击标题栏即可展开；可拖动改变位置；可彻底隐藏（隐藏后只能通过油猴菜单“显示浮动面板”恢复）；支持亮色/暗色手动切换。
+- 亮色/暗色适配：浮动面板和设置弹窗支持手动切换主题。
 
 ## 界面预览
 
@@ -29,21 +29,22 @@
 1. 安装脚本管理器：[Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)。
 2. 打开 Greasy Fork 页面安装脚本：[B 站嘴替小助手](https://greasyfork.org/scripts/583255)。
 3. 登录 B 站，打开形如 `https://www.bilibili.com/video/BV...` 的视频页。
-4. 页面右下角应显示“B 站嘴替小助手”面板。
+4. 页面右下角应显示“B 站嘴替小助手”面板（默认最小化为标题栏，点击展开）。
 
 脚本使用 `@connect *`，因为 OpenAI-compatible API 地址由用户配置。Tampermonkey 首次请求某个 API 域名时可能要求授权。
 
 ## 快速开始
 
-1. 打开一个视频页，面板会自动提取视频信息（标题、UP 主、简介、字幕状态等）。
-2. 点击右上角“设置”，填写 API 地址、模型名称、API Key 和生成偏好。
+1. 打开一个视频页，面板会以最小化形态（仅标题栏）出现在右下角，点击标题栏展开，自动提取视频信息（标题、UP 主、简介、字幕状态等）。
+2. 点击标题栏右侧“设置”，填写 API 地址、模型名称、API Key 和生成偏好。
 3. 点击“生成评论”，检查并编辑生成文本。
 4. 点击“填入评论框”仅填入文本（不发送），或点击“发送评论”填入并直接发送。
 5. 如需生成后自动发送，勾选“自动发布”（受每日上限和 10 分钟间隔限制）。
+6. 想彻底隐藏面板？点击标题栏右侧的“×”按钮；恢复时通过油猴菜单的“显示浮动面板”即可。
 
 ## 配置
 
-点击浮动面板右上角的“设置”，或从脚本管理器菜单选择“打开 B 站嘴替小助手设置”。
+点击浮动面板标题栏右侧的“设置”，或从脚本管理器菜单选择“打开 B 站嘴替小助手设置”。
 
 - API 地址：基础地址，如 `https://api.deepseek.com/v1`，也支持完整 `/chat/completions` 地址。
 - 模型名称：默认 `deepseek-v4-flash`，可填写服务商实际提供的模型 ID。
@@ -80,7 +81,7 @@
 
 - B 站是 SPA，DOM 和 Web Components 会持续变化；页面改版可能导致选择器失效。
 - 评论提取只读取当前页面已经渲染的顶层评论，不主动翻页。
-- 动态页发现只扫描当前已渲染区域，不是账号关注动态 API 的完整实现。
+- 脚本仅在视频页（`www.bilibili.com/video/*`）运行，不覆盖动态页、空间页等其他场景。
 - 播放列表、番剧、稍后再看等特殊页面布局可能无法提取或发布。
 - 发布成功以“点击发送后输入框清空”为页面侧证据；网络延迟、审核或页面改版可能导致结果不确定。
 - LLM 输出会检查非空、AI 自述和 20～100 字长度，但内容真实性和质量仍需人工复核。
@@ -106,6 +107,12 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 </details>
 
 <details>
+<summary><b>面板太碍事，能隐藏吗？隐藏后怎么恢复？</b></summary>
+
+可以。面板标题栏右侧有一个“×”按钮，点击即可彻底隐藏面板（连标题栏都不显示）。隐藏后只能通过油猴脚本管理器菜单中的“显示浮动面板”来恢复。如果只是想缩小占用，点击标题栏即可在“仅标题栏”和“完整面板”之间切换，无需彻底隐藏。
+</details>
+
+<details>
 <summary><b>如何重置脚本数据？</b></summary>
 
 在脚本管理器的脚本存储界面删除 `bllmc_config_v1`、`bllmc_processed_v1` 和 `bllmc_publish_stats_v1`。
@@ -113,6 +120,7 @@ B 站评论区通常是懒加载的。先滚动到评论区可以让脚本获得
 
 ## 更新日志
 
+- v0.9.0 (2026-06-21)：收紧监听范围与面板交互重构。`@match` 仅保留 `www.bilibili.com/video/*`，移除动态页、空间动态页、空间视频页和列表页的匹配——评论操作只在视频页发生，脚本不再在这些页面注入任何 UI；同步移除已失效的 `Discovery` 模块、`Page.isDiscoveryPage`、`renderDiscovery`、`discoveryRoots` 选择器及 `Controller.check` 的动态页分支。面板默认以最小化形态（仅标题栏）出现，点击标题栏即可展开/收起，`collapsed` 不再持久化，每次加载都是最小化。移除 FAB 悬浮按钮及其相关代码（`buildFab`/`showFab`/`expandFromFab`/`collapseToFab`、`APP.fabId`、FAB CSS），由“最小化标题栏 + 彻底隐藏”取代。标题栏新增“×”隐藏按钮，点击后面板完全消失，只能通过油猴菜单“显示浮动面板”恢复（隐藏状态下不再做后台视频提取）。油猴菜单中语义模糊的“切换面板/FAB”替换为两个独立命令：“显示浮动面板”和“隐藏浮动面板”。
 - v0.8.2 (2026-06-20)：修复验证码/风险提示误判。风控检测不再扫描整个页面文本，改为仅检查实际可见的验证码组件及弹窗/Toast，并排除脚本自身界面，避免隐藏节点、普通评论或运行日志中的关键词触发误报。
 - v0.8.1 (2026-06-20)：自动发布间隔从 10 分钟降至 30 秒；修复 busy 状态下所有按钮同时显示转圈动画的问题，改为仅当前操作按钮显示转圈，其余按钮仅降低透明度。
 - v0.8.0 (2026-06-20)：UI 面板重构。移除“检查视频”按钮，改为打开面板/切换视频时自动提取视频信息，视频信息区保留“↻”小图标供手动重新提取；移除“测试”复选框和动态按钮文案逻辑，改为两个显式按钮——“填入评论框”（仅填入不发送）和“发送评论”（填入并直接发送），用户按需选择，无需理解“测试模式”概念；移除视频标签 chips 展示（标签仍会抓取并发送给 AI，但 UI 不再逐个显示，改为在元信息行显示“N 标签”计数）；视频信息卡片由多行 chips 改为单行“·”分隔的紧凑元信息行；简化模式栏为“自动发布”复选框 + 今日配额；`Publisher.publish` 新增 `send` 参数替代原 `config.testMode` 判断，`Controller.publish` 默认 `send = isAutomatic`。
